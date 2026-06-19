@@ -8,6 +8,11 @@ Layer 2 training/model module from this file or any component it calls.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Add repo root to sys.path so 'src' is importable on Streamlit Cloud
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import streamlit as st
 from dotenv import load_dotenv
