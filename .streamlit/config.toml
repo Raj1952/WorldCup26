@@ -1,0 +1,27 @@
+# Tempo — Streamlit configuration
+# Config-level chrome suppression + base theme tokens.
+# CSS in styles.py handles anything config.toml can't reach.
+
+[theme]
+base                   = "dark"
+backgroundColor        = "#0B0B0D"
+secondaryBackgroundColor = "#141417"
+textColor              = "#F4F1EA"
+primaryColor           = "#E8B84B"
+# font is overridden by @font-face in styles.py; this is the fallback
+font                   = "sans serif"
+
+[client]
+# "minimal" hides the Deploy button, hamburger, and kebab menu at the
+# framework level — CSS in styles.py doubles down on anything that leaks.
+toolbarMode            = "minimal"
+# Suppress the auto-generated sidebar page list (we build our own nav).
+showSidebarNavigation  = false
+
+[browser]
+gatherUsageStats       = false
+
+[server]
+enableCORS             = false
+enableXsrfProtection   = true
+headless               = true

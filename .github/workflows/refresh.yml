@@ -1,0 +1,88 @@
+name: Daily Refresh
+
+# Runs every day at 06:00 UTC — well after midnight across all WC2026 host
+# time zones (ET/CT/MT/PT), so previous-day results are available in feeds.
+# Manual trigger is available for immediate re-runs or testing.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+# Needs write access to commit and push updated outputs back to the repo.
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Ingest → train → predict → commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30          # hard cap; pipeline typically runs in ~5 min
+
+    steps:
+      # ── Checkout ───────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1         # shallow clone is fine; we only push one commit
+
+      # ── Python ─────────────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── pip cache ──────────────────────────────────────────────────────────
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: pip-
+
+      # ── Data cache ─────────────────────────────────────────────────────────
+      # Cache data/ so we don't re-download 50 k historical rows every run.
+      # Key rotates weekly: stale data gets a full rebuild every seven days.
+      - name: Cache data directory
+        uses: actions/cache@v4
+        with:
+          path: data/
+          key: tempo-data-${{ github.run_id }}
+          restore-keys: tempo-data-
+
+      # ── Install ─────────────────────────────────────────────────────────────
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── Pipeline ───────────────────────────────────────────────────────────
+      - name: Run refresh pipeline
+        env:
+          # C2 checkpoint: register at football-data.org (free) and add this
+          # secret in repo Settings → Secrets → Actions. Without it the
+          # pipeline falls back to the openfootball public feed automatically.
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          # Optional: Supermemory persistence (§ Step 8 in pipelines/refresh.py)
+          SUPERMEMORY_API_KEY: ${{ secrets.SUPERMEMORY_API_KEY }}
+        run: python pipelines/refresh.py
+
+      # ── Commit outputs ─────────────────────────────────────────────────────
+      # Stages only the files the app reads: predictions.parquet and the
+      # reports parquets (holdout metrics, calibration data).
+      # Skips the commit entirely if nothing changed (idempotent runs).
+      - name: Commit updated outputs
+        run: |
+          git config user.name  "tempo-bot"
+          git config user.email "tempo-bot@users.noreply.github.com"
+
+          git add predictions.parquet
+          git add artifacts/reports/holdout_summary.parquet    || true
+          git add artifacts/reports/holdout_calibration.parquet || true
+          git add artifacts/reports/holdout_confidence.parquet  || true
+
+          # Exit cleanly if nothing changed (e.g. no new results today)
+          if git diff --staged --quiet; then
+            echo "No changes to commit — outputs are up to date."
+            exit 0
+          fi
+
+          git commit -m "chore: daily refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push

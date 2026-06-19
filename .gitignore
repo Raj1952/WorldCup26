@@ -1,0 +1,39 @@
+# Secrets — never commit
+.env
+
+# Virtual environment
+.venv/
+
+# Raw data and large pipeline outputs
+data/raw/
+data/tempo.db
+
+# Model artifacts
+artifacts/models/*.pkl
+artifacts/models/*.joblib
+artifacts/models/*.json
+artifacts/models/*.ubj
+artifacts/reports/*.html
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Pipeline output parquets are committed — the app and CI read them.
+# Do NOT add predictions.parquet or artifacts/reports/*.parquet here.
+
+# IDE / OS noise
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

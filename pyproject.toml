@@ -1,0 +1,9 @@
+[project]
+name = "tempo"
+version = "0.1.0"
+description = "World Cup 2026 Match Outcome Predictor"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
