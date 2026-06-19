@@ -273,92 +273,9 @@ what refresh produced — UI is always fast and never trains on page load.
 
 ---
 
-## 7. Design system — World Cup 2026 theme (single source of truth: `theme.py`)
+## 7. Design system
 
-**Product type:** sports-analytics dashboard (daily-updated).
-**Audience:** recruiters, technical reviewers, football fans — heavy mobile traffic
-from LinkedIn, so **mobile-first is mandatory**.
-**Style keywords:** broadcast-grade, premium, geometric, World Cup 2026.
-
-The real WC2026 identity is a restrained **black + gold + warm-white** primary palette
-(with a malachite-green accent), plus a **host-nation triad: Canada red, Mexico green,
-USA blue** (also the three waves of the official ball). We theme authentically around
-this. Dark is the primary surface; a light theme is a supported toggle. **Use semantic
-tokens everywhere — never raw hex in components.**
-
-### 7a. Trademark guardrail (this is a PUBLIC project — obey)
-Evoke the tournament; never copy protected assets. Do **NOT** reproduce the FIFA emblem,
-the stylized "26" mark, the World Cup trophy image, the mascots (Maple, Zayu, Clutch),
-the "Trionda" ball, or the official FIFA typeface. We use only: our own geometric
-square + quarter-circle motif, the palette below, plain-text team names, and
-public-domain country flags. When in doubt, make it ourselves.
-
-### 7b. Color tokens (dark = default)
-```
---bg              #0B0B0D   page background (warm near-black ink)
---surface         #141417   card background
---surface-raised  #1C1C21   elevated / hover
---border          #2A2A31   hairlines, dividers
---text            #F4F1EA   primary text (warm off-white)   (~15:1 on --bg, pass)
---text-muted      #A7A39B   secondary text                  (~6:1 on --bg, pass)
---gold            #E8B84B   signature accent: key numbers, favored pick, focus
---gold-bright     #FFD66B   gold hover/active
---win             #1FB479   Home/favored outcome  (Mexico green / wave 1)
---draw            #3E7BFA   Draw outcome          (USA blue / wave 2)
---loss            #E4564A   Away/underdog outcome (Canada red / wave 3)
-```
-The win/draw/loss = host-nation triad mapping is deliberate: the probability bar reads
-as "World Cup" instantly. Gold is for large text, numbers, the favored pick, and focus
-rings — not body copy. For small text on win/draw/loss fills, use lightened variants to
-keep ≥4.5:1; saturated values are for bars and chips. Provide a light-theme token set
-and verify both themes for contrast before shipping.
-
-### 7c. Typography
-- **Display:** Archivo (Archivo Expanded / heavy weights for big numerals).
-- **Body:** Inter. (On-brand alternative: Noto Sans, the official secondary font.)
-- **Numeric:** JetBrains Mono with **tabular figures** for all stats, %, and scorelines.
-- Body line-height 1.5–1.75; **minimum 16px body on mobile**.
-
-### 7d. Spacing & layout
-- 4pt base, 8pt rhythm: 4 / 8 / 12 / 16 / 24 / 32 / 48 / 64.
-- Breakpoints 375 / 768 / 1024 / 1440. **No horizontal scroll on mobile.** Respect
-  mobile safe-area insets.
-
-### 7e. Signature elements (two — one structural, one data)
-1. **The Geo-Unit** — our original square + quarter-circle module (the visual DNA of the
-   tournament's "26"). Use as: subtle background texture, dividers, loaders (units
-   assembling), and the end-caps of the probability bar.
-2. **The Probability Bar** — one horizontal bar per match split into win/draw/loss
-   segments (triad colors), each labeled in tabular-mono %, with a small "fixture ticket"
-   match-code chip above it. Appears on cards, the match page, and the share card.
-   Animate on update via transform/opacity only, 150–300ms.
-
-### 7f. World Cup UI elements & animations
-- Thin **tri-color accent rail** (green/blue/red) on headers / active nav.
-- Match cards as **fixture tickets**: flags, group chip, kickoff time, geo-unit edge.
-- Standings styled like a broadcast **lower-third**.
-- **Scoreboard-flip** number transitions on update; subtle **geo-unit grid** background;
-  a gentle gold "result settled" flash when a real result lands. All motion 150–300ms,
-  transform/opacity only, and **must honor `prefers-reduced-motion`**.
-
-### 7g. On pixel / retro micro-interactions (design lead's recommendation)
-Do **not** use ASCII/pixel art as the main motif — it undercuts the premium feel. Get
-the playful hover energy from the **Geo-Unit assembly** animations (7f). ONE optional,
-opt-in retro touch behind a `RETRO_GOAL_FX` flag (default off): a tiny 8-bit "goal"
-flash on result updates. A tasteful Easter egg, never core chrome.
-
-### 7h. Data-viz standards (enforces §0.5 §2)
-- **Banned:** Streamlit gauges, donut charts, raw markdown tables for critical data.
-- **Use:** Plotly `Scatterternary`, per-match waterfall, reliability diagram + histogram,
-  RPS-vs-baseline line. Every chart filters or reveals — never decorative.
-
-### 7i. Accessibility (verify before delivering any screen)
-- Contrast ≥4.5:1 for normal text (both themes).
-- Touch targets ≥44×44px, ≥8px spacing.
-- Visible focus rings (use `--gold`) on every interactive element.
-- **No emoji as icons** — inline SVG only (Lucide / Heroicons).
-- Animations 150–300ms, transform/opacity only; honor `prefers-reduced-motion`.
-- Errors render *below* the related field, not only in a top banner.
+Design system: see [DESIGN.md](DESIGN.md).
 
 ---
 
@@ -408,6 +325,13 @@ real data, then move on. Touch only the files named in each step.
   `pipelines/refresh.py` and committing outputs. No other infra. (§0.5 §3)
 - **R6 — Monte Carlo (C4, last & biggest):** simulator per §0.5 §3; produces advancement
   + title odds with uncertainty; once active, un-filter knockout display.
+  - **C4 decisions (2026-06-19):** 50k seeded runs (seed=42); conditioning starts from
+    CURRENT group standings + remaining-match model probabilities, NOT a fresh 48-team
+    draw; projected knockout slots displayed only on the Bracket page, labeled
+    "Projected" — never injected into the Predictions/match-card flow.
+  - Group-stage sim verified: Canada/Switzerland 100% R32 (Group B), Bosnia 49.7%
+    (can win final match → best-third route), Qatar 20.4% — all expected. Next step:
+    knockout-round bracket + road-to-final odds table.
 - **R7 — Share card + README + deploy** (C6, C7).
 
 ---
@@ -456,6 +380,6 @@ Pin versions and `pip freeze` them into `requirements.txt`.
 (§1) — no inherited names/assets; the db is `data/tempo.db`. 3. Identify the current
 remediation step (§9). 4. Stay inside layer boundaries (§4). 5. Watch for a checkpoint
 (§8). 6. Build on real data; touch only the files named. 7. For UI, run the a11y
-checklist (§7i), keep it on-theme (§7), and obey the viz bans (§7h). 8. Report briefly,
+checklist (DESIGN.md §13), keep it on-theme (DESIGN.md), and obey the viz bans (DESIGN.md §8). 8. Report briefly,
 point to artifacts, don't dump large output. 9. Keep it real, daily-fresh, RPS-honest,
 explainable, beautiful.

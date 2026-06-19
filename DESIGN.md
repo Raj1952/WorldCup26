@@ -2,7 +2,7 @@
 
 > Single source of truth for all visual decisions in the Tempo presentation layer.
 > When DESIGN.md conflicts with code, the code is wrong.
-> When DESIGN.md conflicts with CLAUDE.md §7, CLAUDE.md wins (master spec; this file is the implementation translation).
+> When CLAUDE.md §7 is trimmed to a one-line pointer, this file becomes the sole visual specification.
 >
 > Re-read this file at the start of every UI work step.
 
@@ -10,7 +10,9 @@
 
 ## 0. Document Status
 
-Created: 2026-06-20. Branch: `ui/overhaul`.
+Created: 2026-06-20. Elevated (impeccable pass): 2026-06-20. Branch: `ui/overhaul`.
+
+**Step 1 ✓** — donut ban enforced in `today.py`; dead `_prob_donut` removed from `match_detail.py`.
 
 **Path A scope (~85%):** Streamlit app visual overhaul — tokens, components, charts, copy rules.
 Excluded: Bracket/simulation page (pending R6), share card (C6 checkpoint), README (written last).
@@ -80,6 +82,18 @@ These pass ≥4.5:1 contrast on the respective fill colors.
 
 Same token names; lighter values defined in `_LightPalette`. Both themes must pass WCAG 2.2 AA contrast for all text. Verify before shipping any light-mode change.
 
+### 2f. Color strategy
+
+**Strategy: Full palette.** Four named roles, each used deliberately. The palette is closed — never add a fifth color without removing one.
+
+| Role | Tokens | Purpose |
+|---|---|---|
+| **Neutral** | `--bg` `--surface` `--surface-raised` `--border` `--text` `--text-muted` | Foundation — never decorative |
+| **Gold** | `--gold` `--gold-bright` | Identity accent — see §2c rationing |
+| **Outcome triad** | `--win` `--draw` `--loss` | Data viz only — color as signal, not decoration |
+
+Color here is data. The probability bar and ternary carry the palette. Everywhere else is neutral.
+
 ---
 
 ## 3. Typography
@@ -117,6 +131,7 @@ All three fonts load from Google Fonts via `styles.py`. `font-variant-numeric: t
 - `text-transform: uppercase` only on section headings (`.sec-heading`) and mono chips — never on primary text.
 - Minimum readable text: 16px body, 0.66rem (10.6px) for chips/stamps only.
 - `text-wrap: balance` on h1–h3 for even line lengths where supported.
+- `text-wrap: pretty` on body prose paragraphs (≥3 lines) to prevent orphaned last words.
 
 ---
 
@@ -162,9 +177,29 @@ All three fonts load from Google Fonts via `styles.py`. `font-variant-numeric: t
 | `--anim-normal` | 200ms | Card hover, metric updates |
 | `--anim-slow` | 300ms | Page-level (rare) |
 
-- Easing: ease-out. No bounce, no elastic.
+- Easing (use explicit `cubic-bezier()`, not the `ease` keyword):
+  - `--anim-fast` (150ms): `cubic-bezier(0.25, 0, 0, 1)` — ease-out-quart
+  - `--anim-normal` (200ms): `cubic-bezier(0.16, 1, 0.3, 1)` — expo-out
+  - `--anim-slow` (300ms): `cubic-bezier(0.12, 0, 0.39, 0)` — ease-out-quint
+- No bounce, no elastic. No x control-points outside [0, 1].
 - Animated properties: `transform`, `opacity`, `border-color`, `box-shadow` only.
 - `@media (prefers-reduced-motion: reduce)` disables all — maintained in `styles.py`. Keep it.
+
+### 5d. Z-Index scale
+
+Semantic named layers — never arbitrary values like 999 or 9999.
+
+| Layer | Value | Use |
+|---|---|---|
+| `--z-base` | 0 | Normal document flow |
+| `--z-sticky` | 100 | Sticky headers, floating clear-selection button |
+| `--z-dropdown` | 200 | Streamlit dropdowns, multiselect popovers |
+| `--z-modal-backdrop` | 300 | Overlay scrim |
+| `--z-modal` | 400 | Modal dialogs |
+| `--z-toast` | 500 | Toast / snackbar notifications |
+| `--z-tooltip` | 600 | Plotly tooltips, custom tooltips (topmost) |
+
+In Streamlit: apply to `.stPopover`, `.stTooltipContent`, and custom HTML overlays only. Never set arbitrary z-index on Streamlit-managed elements.
 
 ---
 
@@ -296,6 +331,33 @@ One horizontal bar per match, split: Home Win / Draw / Away Win.
 
 ---
 
+### 7g. Icon Vocabulary
+
+- **Library:** Lucide (inline SVG). Heroicons is acceptable where Lucide lacks coverage.
+- **No emoji as icons** — see §9.
+- **Sizes:** 16×16px (inline label), 20×20px (standard UI), 24×24px (section heading accent).
+- **Stroke width:** 1.5px at all sizes.
+- **Color:** `currentColor` — never hardcoded hex.
+- **Touch targets:** icon-only interactive elements need a 44×44px tap target via padding or `min-width`/`min-height`.
+
+---
+
+### 7h. Loading & Skeleton States
+
+When predictions are loading (pipeline not yet run, or `predictions.parquet` being written):
+
+- **Match card skeleton:** `--surface-raised` background with animated shimmer sweeping left-to-right.
+  ```css
+  background: linear-gradient(90deg, var(--surface-raised) 0%, var(--border) 50%, var(--surface-raised) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  ```
+  `@media (prefers-reduced-motion)`: animation off; static `--surface-raised` fill only.
+- **Metric card skeleton:** `--surface` background, `--border` border, `--text-muted` "—" value.
+- **Rule:** never mix real and placeholder rows. Show skeleton (loading) or no-data state (§7f, pipeline not run) — never both at once.
+
+---
+
 ## 8. Visualization Rules
 
 ### 8a. Required charts (per CLAUDE.md §0.5)
@@ -313,13 +375,15 @@ One horizontal bar per match, split: Home Win / Draw / Away Win.
 - **Accuracy gauge** — banned. RPS is the headline.
 - **Raw markdown tables** for critical prediction data — use `st.dataframe` or styled HTML.
 
-### 8c. Current violation to fix
+### 8c. Violations — resolved (Step 1 ✓)
 
-`today.py` renders `_group_donut(upcoming)` — a donut chart in the "Outlook" section.
-**This violates §0.5/§2 and must be removed in Step 1.**
-Replacement: a 3-number outcome distribution row (Home favored N · Draw likely N · Away favored N) using `.outcome-row` visual language, or a bar chart.
+~~`today.py` rendered `_group_donut(upcoming)` — a banned donut chart in the "Outlook" section.~~
+**Fixed:** replaced with 3-stat outcome summary (triad colors, tabular-mono counts).
 
-`match_detail.py` contains a dead `_prob_donut` function that is never called. Remove it in Step 6 (dead code cleanup).
+~~`match_detail.py` contained a dead `_prob_donut` function.~~
+**Fixed:** dead code removed.
+
+No active visualization violations remain.
 
 ### 8d. Plotly style rules
 
@@ -342,6 +406,8 @@ Replacement: a 3-number outcome distribution row (Home favored N · Draw likely 
 | Muted text | `--text-muted` #A7A39B | `--bg` #0B0B0D | ✓ ~6:1 |
 | Gold on bg (large) | `--gold` #E8B84B | `--bg` #0B0B0D | ✓ large text only |
 | Prob bar text | dark tints (§2d) | `--win/draw/loss` | must verify per fill |
+| Muted text on surface | `--text-muted` #A7A39B | `--surface` #141417 | ✓ ~5:1 |
+| Muted text on surface-raised | `--text-muted` #A7A39B | `--surface-raised` #1C1C21 | ✓ ~4.8:1 |
 
 ### Keyboard & interaction
 
@@ -375,7 +441,7 @@ Replacement: a 3-number outcome distribution row (Home favored N · Draw likely 
 
 Match-and-refuse when reviewing code.
 
-1. **Donut / pie charts** — banned everywhere. Active violation in `today.py`.
+1. **Donut / pie charts** — banned everywhere.
 2. **Accuracy gauge** — banned.
 3. **"Live" / "real-time" copy** — use "updates daily via batch".
 4. **Gradient text** (`background-clip: text` + gradient) — banned.
@@ -397,12 +463,12 @@ Steps executed one at a time. App must be runnable after each. Each step committ
 | Step | File(s) to touch | Change |
 |---|---|---|
 | **0 ✓** | `DESIGN.md`, branch `ui/overhaul` | This file. Source of truth established. |
-| **1** | `today.py` | Remove banned `_group_donut`; replace "Outlook" section with 3-stat outcome summary |
+| **1 ✓** | `today.py`, `match_detail.py` | Remove banned `_group_donut`; replace "Outlook" with 3-stat outcome summary; remove dead `_prob_donut` |
 | **2** | `theme.py` (CSS in `apply_global_css`) | Fix match card `border-radius` to `--radius-md`; tighten h1 letter-spacing |
 | **3** | `today.py` | Match card chip and team layout polish |
 | **4** | `model_report.py` | RPS headline prominence; baseline row; section heading cleanup |
 | **5** | `match_space.py` | Detail panel layout; prob display using prob-bar classes |
-| **6** | `match_detail.py` | Remove dead `_prob_donut`; tighten layout |
+| **6** | `match_detail.py` | Tighten layout (dead code already removed in Step 1) |
 | **7** | `app.py`, `styles.py` | Sidebar polish: brand spacing, legend, nav refinements |
 
 Steps beyond Step 2 are subject to explicit approval before starting.
@@ -425,3 +491,26 @@ Run before marking any step done:
 - [ ] `data as of {timestamp}` stamp present on every page
 - [ ] Mobile: no horizontal scroll at 375px viewport
 - [ ] `prefers-reduced-motion` honored
+- [ ] No trademark-protected assets rendered (§14)
+
+---
+
+## 14. Trademark & IP Guardrail
+
+This is a public portfolio piece. Evoke the tournament; never copy protected assets.
+
+**Never reproduce:**
+- The FIFA emblem
+- The stylized "26" wordmark
+- The World Cup trophy image
+- The mascots (Maple, Zayu, Clutch)
+- The "Trionda" ball graphic
+- The official FIFA typeface
+
+**Use only:**
+- Tempo's own geometric square + quarter-circle motif (the geo-unit — §6f)
+- The palette from §2
+- Plain-text team names
+- Public-domain country flags (rendered via `flags.py`, SVG)
+
+When in doubt, make it ourselves. The geo-unit is Tempo's visual identity — it evokes the tournament without replicating any protected mark.
