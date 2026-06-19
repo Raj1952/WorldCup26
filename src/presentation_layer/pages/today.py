@@ -7,7 +7,6 @@ from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from src.presentation_layer.theme import DARK, APP_NAME
@@ -133,39 +132,6 @@ def _match_card_html(row: pd.Series) -> str:
 </div>"""
 
 
-def _group_donut(df: pd.DataFrame) -> go.Figure:
-    """Donut showing predicted outcome distribution across all upcoming matches."""
-    favored_home = (df["p_home"] > df["p_draw"]) & (df["p_home"] > df["p_away"])
-    favored_draw = (df["p_draw"] >= df["p_home"]) & (df["p_draw"] >= df["p_away"])
-    favored_away = (df["p_away"] > df["p_home"]) & (df["p_away"] > df["p_draw"])
-    vals = [favored_home.sum(), favored_draw.sum(), favored_away.sum()]
-    fig = go.Figure(go.Pie(
-        labels=["Home favored", "Draw likely", "Away favored"],
-        values=vals,
-        hole=0.65,
-        marker=dict(colors=["#1FB479", "#3E7BFA", "#E4564A"],
-                    line=dict(color="#0B0B0D", width=2)),
-        textfont=dict(family="'JetBrains Mono',monospace", size=11),
-        hovertemplate="%{label}: <b>%{value}</b> matches<extra></extra>",
-    ))
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=True,
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#A7A39B", size=10),
-                    orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
-        height=220,
-        margin=dict(l=0, r=0, t=10, b=30),
-        annotations=[dict(
-            text=f"<b>{len(df)}</b><br><span style='font-size:10px'>matches</span>",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=18, color="#E8B84B", family="'JetBrains Mono',monospace"),
-        )],
-    )
-    return fig
-
-
 def _no_data_banner() -> None:
     st.markdown("""
 <div class="no-data">
@@ -261,7 +227,27 @@ def render(theme=DARK) -> None:
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<div class="sec-heading">Outlook</div>', unsafe_allow_html=True)
         if not upcoming.empty:
-            st.plotly_chart(_group_donut(upcoming), use_container_width=True)
+            n_home = int(((upcoming["p_home"] > upcoming["p_draw"]) & (upcoming["p_home"] > upcoming["p_away"])).sum())
+            n_draw = int(((upcoming["p_draw"] > upcoming["p_home"]) & (upcoming["p_draw"] > upcoming["p_away"])).sum())
+            n_away = int(((upcoming["p_away"] > upcoming["p_home"]) & (upcoming["p_away"] > upcoming["p_draw"])).sum())
+            st.markdown(f"""
+<div style="padding:0.25rem 0 0.5rem;">
+  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
+    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
+                 color:var(--win);font-variant-numeric:tabular-nums;line-height:1;">{n_home}</span>
+    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Home favored</span>
+  </div>
+  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
+    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
+                 color:var(--draw);font-variant-numeric:tabular-nums;line-height:1;">{n_draw}</span>
+    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Draw likely</span>
+  </div>
+  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
+    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
+                 color:var(--loss);font-variant-numeric:tabular-nums;line-height:1;">{n_away}</span>
+    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Away favored</span>
+  </div>
+</div>""", unsafe_allow_html=True)
 
     with col_cards:
         filtered = upcoming[

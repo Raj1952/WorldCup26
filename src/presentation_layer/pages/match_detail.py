@@ -39,41 +39,6 @@ def _dark_layout() -> dict:
     )
 
 
-def _prob_donut(p_home: float, p_draw: float, p_away: float,
-                home: str, away: str) -> go.Figure:
-    labels = [f"{home} Win", "Draw", f"{away} Win"]
-    values = [p_home, p_draw, p_away]
-    colors = ["#1FB479", "#3E7BFA", "#E4564A"]
-
-    fig = go.Figure(go.Pie(
-        labels=labels,
-        values=values,
-        hole=0.6,
-        marker=dict(colors=colors, line=dict(color="#0B0B0D", width=2)),
-        textfont=dict(family="'JetBrains Mono', monospace", size=12, color="#F4F1EA"),
-        hovertemplate="%{label}: <b>%{percent}</b><extra></extra>",
-    ))
-    fig.update_layout(
-        **_dark_layout(),
-        showlegend=True,
-        legend=dict(
-            bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#A7A39B", size=11),
-            orientation="h",
-            yanchor="bottom", y=-0.2,
-            xanchor="center", x=0.5,
-        ),
-        height=300,
-        annotations=[dict(
-            text=f"<b>{max(p_home, p_draw, p_away):.0%}</b>",
-            x=0.5, y=0.5,
-            font=dict(size=22, color="#E8B84B", family="'JetBrains Mono', monospace"),
-            showarrow=False,
-        )],
-    )
-    return fig
-
-
 def _factors_bar(factors: list[dict], home: str) -> go.Figure:
     if not factors:
         return go.Figure()
