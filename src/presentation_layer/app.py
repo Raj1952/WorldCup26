@@ -27,6 +27,7 @@ from src.presentation_layer.pages import today
 from src.presentation_layer.pages import model_report
 from src.presentation_layer.pages import match_detail
 from src.presentation_layer.pages import match_space
+from src.presentation_layer.pages import bracket
 
 load_dotenv()
 
@@ -50,7 +51,7 @@ _ROUTES = [
     ("match-space",  "target",      "Match Space",  False),
     ("match-detail", "search",      "Match Detail", False),
     ("model-report", "bar-chart-2", "Model Report", False),
-    ("bracket",      "trophy",      "Bracket",      True),   # R6 — Monte Carlo not yet built
+    ("bracket",      "trophy",      "Bracket",      False),
 ]
 _VALID_PAGES = {r[0] for r in _ROUTES} | {"foundation"}
 
@@ -236,6 +237,6 @@ elif page == "match-detail":
 elif page == "model-report":
     model_report.render(theme=DARK)
 elif page == "bracket":
-    _render_bracket_placeholder()
+    bracket.render(theme=DARK)
 elif page == "foundation":
     _render_foundation_demo()
