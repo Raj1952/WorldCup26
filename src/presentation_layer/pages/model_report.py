@@ -1,4 +1,4 @@
-"""Model Report page — model performance, calibration, and prediction log."""
+"""Model Report page — RPS headline strip, reliability diagram, RPS-vs-baseline timeline."""
 
 from __future__ import annotations
 
@@ -7,60 +7,31 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 from plotly.subplots import make_subplots
 import streamlit as st
 
 from src.presentation_layer.theme import DARK, APP_NAME
 from src.intelligence_layer.registry import list_registry
 
-DB_PATH = "data/tempo.db"
+DB_PATH   = "data/tempo.db"
+_REPORTS  = Path("artifacts/reports")
+
+# ── Design tokens (kept local — no cross-layer import) ────────────────────────
+_WIN   = "#4CA882"
+_DRAW  = "#6B8ABF"
+_LOSS  = "#C9645C"
+_GOLD  = "#E8B84B"
+_TEXT  = "#F4F1EA"
+_MUTED = "#A7A39B"
+_BG    = "rgba(0,0,0,0)"
+_SURF  = "#141417"
+_BORDER= "#2A2A31"
+_MONO  = "JetBrains Mono, monospace"
+_BODY  = "Inter, sans-serif"
+_DISP  = "Archivo, sans-serif"
 
 
-def _load_metrics() -> pd.DataFrame:
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        df = pd.read_sql("SELECT * FROM model_metrics ORDER BY created_at DESC", conn)
-        conn.close()
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-
-def _load_recent_results() -> pd.DataFrame:
-    """Matches we predicted AND now have a real result for."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        # WC2026 played matches joined with predictions parquet manually
-        df = pd.read_sql(
-            "SELECT date,home_team,away_team,home_score,away_score,outcome "
-            "FROM matches WHERE source IN ('openfootball','football-data.org','manual') "
-            "AND tournament LIKE '%2026%' "
-            "ORDER BY date DESC LIMIT 50",
-            conn,
-        )
-        conn.close()
-        return df
-    except Exception:
-        return pd.DataFrame()
-
-
-def _dark_layout(title: str = "") -> dict:
-    return dict(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_family="'Inter', sans-serif",
-        font_color="#F4F1EA",
-        title_text=title,
-        title_font_family="'Archivo', sans-serif",
-        title_font_size=15,
-        margin=dict(l=10, r=10, t=40, b=10),
-    )
-
-
-_REPORTS = Path("artifacts/reports")
-
+# ── Data loaders ──────────────────────────────────────────────────────────────
 
 def _load_holdout_summary() -> dict:
     p = _REPORTS / "holdout_summary.parquet"
@@ -73,35 +44,190 @@ def _load_holdout_summary() -> dict:
 
 
 def _load_holdout_calibration() -> tuple[pd.DataFrame, pd.DataFrame]:
-    cal_p = _REPORTS / "holdout_calibration.parquet"
+    cal_p  = _REPORTS / "holdout_calibration.parquet"
     conf_p = _REPORTS / "holdout_confidence.parquet"
-    cal = pd.read_parquet(cal_p) if cal_p.exists() else pd.DataFrame()
+    cal  = pd.read_parquet(cal_p)  if cal_p.exists()  else pd.DataFrame()
     conf = pd.read_parquet(conf_p) if conf_p.exists() else pd.DataFrame()
     return cal, conf
 
 
+def _load_metrics_history() -> pd.DataFrame:
+    """All model versions from the registry, with RPS from holdout summary where available."""
+    reg = list_registry()
+    if not reg:
+        return pd.DataFrame()
+    rows = []
+    for r in reg:
+        rows.append({
+            "version":    r.get("version", ""),
+            "created_at": r.get("created_at", ""),
+            "log_loss":   r.get("log_loss_test"),
+            "accuracy":   r.get("accuracy_test"),
+            "brier":      r.get("brier_test"),
+            "n_test":     r.get("n_test"),
+        })
+    df = pd.DataFrame(rows)
+    df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df = df.sort_values("created_at").reset_index(drop=True)
+    return df
+
+
+def _compute_baselines(cal_df: pd.DataFrame) -> dict[str, float]:
+    """
+    Derive uniform and always-home RPS baselines from the holdout class distribution.
+
+    RPS is computed analytically from observed class frequencies:
+      - Uniform (1/3, 1/3, 1/3): closed-form per class
+      - Always-home (1, 0, 0): closed-form per class
+    """
+    if cal_df.empty:
+        return {"uniform": 0.240, "always_home": 0.420}
+
+    freqs: dict[str, float] = {}
+    for outcome in ["home", "draw", "away"]:
+        sub = cal_df[cal_df["outcome"] == outcome].dropna(subset=["obs_freq", "bin_count"])
+        if not sub.empty:
+            total_n = sub["bin_count"].sum()
+            total_k = (sub["obs_freq"] * sub["bin_count"]).sum()
+            freqs[outcome] = float(total_k / total_n) if total_n > 0 else 1 / 3
+
+    f_h = freqs.get("home", 1 / 3)
+    f_d = freqs.get("draw", 1 / 3)
+    f_a = freqs.get("away", 1 / 3)
+
+    # Uniform: cum_pred=[1/3, 2/3]
+    #   Home  (y=0): ((1/3-1)²+(2/3-1)²)/2 = 5/18
+    #   Draw  (y=1): ((1/3-0)²+(2/3-1)²)/2 = 1/9
+    #   Away  (y=2): ((1/3-0)²+(2/3-0)²)/2 = 5/18
+    rps_uniform = f_h * (5 / 18) + f_d * (1 / 9) + f_a * (5 / 18)
+
+    # Always-home: cum_pred=[1, 1]
+    #   Home  (y=0): 0
+    #   Draw  (y=1): ((1-0)²+(1-1)²)/2 = 0.5
+    #   Away  (y=2): ((1-0)²+(1-0)²)/2 = 1.0
+    rps_always_home = f_d * 0.5 + f_a * 1.0
+
+    return {"uniform": rps_uniform, "always_home": rps_always_home}
+
+
+# ── Metric strip ──────────────────────────────────────────────────────────────
+
+def _metric_strip_html(holdout: dict, baselines: dict) -> str:
+    rps       = holdout.get("rps_test")
+    ll        = holdout.get("log_loss_test")
+    brier     = holdout.get("brier_test")
+    acc       = holdout.get("accuracy_test")
+    n_test    = holdout.get("n_test")
+    ver       = str(holdout.get("model_version", "—"))
+
+    rps_str   = f"{rps:.4f}"  if rps    is not None else "—"
+    ll_str    = f"{ll:.4f}"   if ll     is not None else "—"
+    brier_str = f"{brier:.4f}" if brier  is not None else "—"
+    acc_str   = f"{acc:.1%}"  if acc    is not None else "—"
+    n_str     = f"{int(n_test):,}" if n_test is not None else "—"
+    ver_short = ver[:28] + "…" if len(ver) > 28 else ver
+
+    b_uni  = baselines.get("uniform",     0.240)
+    b_home = baselines.get("always_home", 0.420)
+
+    beats_uni  = rps is not None and rps < b_uni
+    beats_home = rps is not None and rps < b_home
+
+    def _badge(label: str, ok: bool) -> str:
+        color = _WIN if ok else _LOSS
+        symbol = "✓" if ok else "✗"
+        return (
+            f'<span style="display:inline-flex;align-items:center;gap:4px;'
+            f'background:{"rgba(76,168,130,0.12)" if ok else "rgba(201,100,92,0.12)"};'
+            f'border:1px solid {"rgba(76,168,130,0.3)" if ok else "rgba(201,100,92,0.3)"};'
+            f'border-radius:5px;padding:1px 8px;font-family:{_MONO};font-size:0.65rem;'
+            f'color:{color};">{symbol} {label}</span>'
+        )
+
+    return f"""
+<div style="
+  background:{_SURF};
+  border:1px solid {_BORDER};
+  border-radius:12px;
+  padding:1.1rem 1.4rem 1rem;
+  margin-bottom:1.5rem;
+  position:relative;
+  overflow:hidden;
+">
+  <!-- Tri-color accent rail -->
+  <div style="position:absolute;top:0;left:0;right:0;height:3px;
+    background:linear-gradient(90deg,{_WIN} 0% 33.3%,{_DRAW} 33.3% 66.6%,{_LOSS} 66.6% 100%);
+  "></div>
+
+  <!-- Primary: RPS -->
+  <div style="display:flex;align-items:baseline;gap:1rem;flex-wrap:wrap;margin-bottom:0.5rem;">
+    <div>
+      <div style="font-family:{_BODY};font-size:0.65rem;font-weight:600;
+        text-transform:uppercase;letter-spacing:0.1em;color:{_MUTED};margin-bottom:3px;">
+        Ranked Probability Score &nbsp;·&nbsp; primary &nbsp;·&nbsp; lower = better
+      </div>
+      <div style="font-family:{_MONO};font-size:2.6rem;font-weight:700;
+        color:{_GOLD};line-height:1;font-variant-numeric:tabular-nums;">
+        {rps_str}
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:5px;padding-top:4px;">
+      {_badge(f"beats uniform {b_uni:.3f}", beats_uni)}
+      {_badge(f"beats always-home {b_home:.3f}", beats_home)}
+    </div>
+  </div>
+
+  <!-- Divider -->
+  <div style="border-top:1px solid {_BORDER};margin:0.7rem 0;"></div>
+
+  <!-- Secondary metrics -->
+  <div style="display:flex;flex-wrap:wrap;gap:0.35rem 1.5rem;align-items:baseline;">
+    <span style="font-family:{_MONO};font-size:0.78rem;color:{_MUTED};">
+      Log-Loss <span style="color:{_TEXT};font-weight:600;">{ll_str}</span>
+    </span>
+    <span style="color:{_BORDER};">·</span>
+    <span style="font-family:{_MONO};font-size:0.78rem;color:{_MUTED};">
+      Brier <span style="color:{_TEXT};font-weight:600;">{brier_str}</span>
+    </span>
+    <span style="color:{_BORDER};">·</span>
+    <span style="font-family:{_MONO};font-size:0.78rem;color:{_MUTED};">
+      Accuracy <span style="color:{_TEXT};font-weight:600;">{acc_str}</span>
+      <span style="font-size:0.62rem;color:{_MUTED};opacity:0.7;">(secondary — not headline)</span>
+    </span>
+    <span style="color:{_BORDER};">·</span>
+    <span style="font-family:{_MONO};font-size:0.72rem;color:{_MUTED};">
+      {n_str} test matches
+    </span>
+    <span style="color:{_BORDER};">·</span>
+    <span style="font-family:{_MONO};font-size:0.65rem;color:{_MUTED};opacity:0.65;">
+      {ver_short}
+    </span>
+  </div>
+</div>"""
+
+
+# ── Charts ────────────────────────────────────────────────────────────────────
+
 def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figure:
-    """
-    Reliability diagram (predicted vs observed per class) with confidence histogram beneath.
-    Replaces the accuracy gauge per §0.5.
-    """
+    """Reliability diagram (rows 1) + confidence histogram (row 2). template=tempo."""
     fig = make_subplots(
         rows=2, cols=1,
-        row_heights=[0.68, 0.32],
-        vertical_spacing=0.08,
+        row_heights=[0.65, 0.35],
+        vertical_spacing=0.10,
         subplot_titles=["Reliability Diagram", "Model Confidence Distribution"],
     )
 
     outcome_meta = [
-        ("home", "Home Win", "#4CA882"),
-        ("draw", "Draw",     "#6B8ABF"),
-        ("away", "Away Win", "#C9645C"),
+        ("home", "Home Win", _WIN),
+        ("draw", "Draw",     _DRAW),
+        ("away", "Away Win", _LOSS),
     ]
 
     for outcome, label, color in outcome_meta:
         sub = cal_df[cal_df["outcome"] == outcome].dropna(subset=["mean_pred", "obs_freq"])
         if sub.empty:
             continue
+        sizes = (sub["bin_count"].clip(upper=200) / 15 + 5).tolist()
         fig.add_trace(go.Scatter(
             x=sub["mean_pred"],
             y=sub["obs_freq"],
@@ -109,7 +235,7 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
             name=label,
             line=dict(color=color, width=2),
             marker=dict(
-                size=sub["bin_count"].clip(upper=200) / 15 + 5,
+                size=sizes,
                 color=color,
                 opacity=0.85,
                 line=dict(color="#111114", width=1),
@@ -119,7 +245,7 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
                 f"<b>{label}</b><br>"
                 "Predicted: %{x:.0%}<br>"
                 "Observed: %{y:.0%}<br>"
-                "N=%{customdata[0]}<extra></extra>"
+                "N = %{customdata[0]}<extra></extra>"
             ),
         ), row=1, col=1)
 
@@ -128,7 +254,7 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
         x=[0, 1], y=[0, 1],
         mode="lines",
         name="Perfect calibration",
-        line=dict(color="#E8B84B", width=1.5, dash="dot"),
+        line=dict(color=_GOLD, width=1.5, dash="dot"),
         hoverinfo="skip",
     ), row=1, col=1)
 
@@ -136,235 +262,245 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
     if not conf_df.empty:
         fig.add_trace(go.Histogram(
             x=conf_df["confidence"],
-            nbinsx=20,
+            nbinsx=25,
             name="Confidence",
-            marker_color="#6B8ABF",
+            marker_color=_DRAW,
             marker_line=dict(color="#111114", width=0.5),
-            opacity=0.75,
+            opacity=0.78,
             hovertemplate="Confidence: %{x:.0%}<br>Matches: %{y}<extra></extra>",
+            showlegend=False,
         ), row=2, col=1)
 
+    _ax = dict(gridcolor=_BORDER, color=_MUTED,
+               tickfont=dict(family=_MONO, size=10, color=_MUTED),
+               linecolor=_BORDER)
+
     fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_family="'Inter', sans-serif",
-        font_color="#F4F1EA",
+        template="tempo",
+        height=500,
         margin=dict(l=10, r=10, t=50, b=10),
-        height=480,
         legend=dict(
             bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#A7A39B", size=10),
+            font=dict(color=_MUTED, size=11),
             orientation="h",
             yanchor="bottom", y=1.02,
-            xanchor="right", x=1,
+            xanchor="right",  x=1,
         ),
-        showlegend=True,
     )
-    axis_style = dict(gridcolor="#2A2A31", color="#A7A39B",
-                      tickfont=dict(family="'JetBrains Mono',monospace", size=10))
-    fig.update_xaxes(**axis_style)
-    fig.update_yaxes(**axis_style)
+    fig.update_xaxes(**_ax)
+    fig.update_yaxes(**_ax)
     fig.update_xaxes(range=[0, 1], tickformat=".0%", row=1, col=1)
     fig.update_yaxes(range=[0, 1], tickformat=".0%", row=1, col=1)
-    fig.update_xaxes(tickformat=".0%", title_text="Max predicted probability", row=2, col=1)
-    fig.update_yaxes(title_text="Count", row=2, col=1)
-
-    # Annotation per subplot title
+    fig.update_xaxes(tickformat=".0%", title_text="Max predicted probability (model confidence)", row=2, col=1)
+    fig.update_yaxes(title_text="Match count", row=2, col=1)
     for ann in fig["layout"]["annotations"]:
-        ann["font"] = dict(size=12, color="#A7A39B", family="'Inter',sans-serif")
+        ann["font"] = dict(size=12, color=_MUTED, family=_BODY)
 
     return fig
 
 
-def _metrics_timeline(df: pd.DataFrame) -> go.Figure:
+def _rps_timeline(hist_df: pd.DataFrame, holdout: dict, baselines: dict) -> go.Figure:
+    """RPS per model version vs uniform and always-home baselines. template=tempo."""
+    b_uni  = baselines.get("uniform",     0.240)
+    b_home = baselines.get("always_home", 0.420)
+
+    # Build model RPS series: use holdout_summary for the current version
+    # (model_metrics table doesn't store RPS; registry entries don't either)
+    rps_val  = holdout.get("rps_test")
+    ver      = holdout.get("model_version", "")
+    created  = holdout.get("created_at")
+
+    points_x, points_y, points_label = [], [], []
+    if rps_val is not None and created:
+        try:
+            ts = pd.to_datetime(created)
+            points_x.append(ts)
+            points_y.append(rps_val)
+            ver_short = str(ver)[:20] + "…" if len(str(ver)) > 20 else str(ver)
+            points_label.append(f"<b>{ver_short}</b><br>RPS: {rps_val:.4f}")
+        except Exception:
+            pass
+
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["created_at"], y=df["log_loss_test"],
-        name="Log-Loss (lower = better)",
-        line=dict(color="#6B8ABF", width=2),
-        mode="lines+markers",
-        marker=dict(size=6, color="#6B8ABF"),
-    ))
-    fig.add_trace(go.Scatter(
-        x=df["created_at"], y=df["accuracy_test"],
-        name="Accuracy",
-        line=dict(color="#4CA882", width=2),
-        mode="lines+markers",
-        marker=dict(size=6, color="#4CA882"),
-        yaxis="y2",
-    ))
+
+    # Model RPS line / markers
+    if points_x:
+        fig.add_trace(go.Scatter(
+            x=points_x,
+            y=points_y,
+            mode="lines+markers",
+            name="Model RPS",
+            line=dict(color=_GOLD, width=2.5),
+            marker=dict(
+                size=12, color=_GOLD,
+                line=dict(color="#111114", width=2),
+                symbol="circle",
+            ),
+            text=points_label,
+            hovertemplate="%{text}<extra></extra>",
+        ))
+
+    # X range: always span at least the tournament window so a single point
+    # doesn't collapse to microsecond precision on the axis
+    _tournament_start = pd.Timestamp("2026-06-11")
+    _tournament_end   = pd.Timestamp("2026-07-20")
+    if points_x:
+        x0 = min(min(points_x) - pd.Timedelta(days=7), _tournament_start)
+        x1 = max(max(points_x) + pd.Timedelta(days=7), _tournament_end)
+    else:
+        x0 = _tournament_start
+        x1 = _tournament_end
+
+    def _ref_line(y: float, label: str, color: str, dash: str = "dash") -> None:
+        fig.add_shape(
+            type="line", xref="paper", yref="y",
+            x0=0, x1=1, y0=y, y1=y,
+            line=dict(color=color, width=1.5, dash=dash),
+        )
+        fig.add_annotation(
+            xref="paper", yref="y", x=1.01, y=y,
+            text=f"<b>{label}</b><br>{y:.3f}",
+            showarrow=False, xanchor="left",
+            font=dict(family=_MONO, size=10, color=color),
+        )
+
+    _ref_line(b_uni,  "Uniform",      _MUTED,  "dot")
+    _ref_line(b_home, "Always-home",  _BORDER, "dash")
+
+    # Beat-zone shading (below uniform = model territory)
+    if points_x:
+        fig.add_hrect(
+            y0=0, y1=b_uni,
+            fillcolor="rgba(76,168,130,0.04)",
+            line_width=0,
+            annotation_text="model territory", annotation_position="top left",
+            annotation_font=dict(size=9, color=_WIN, family=_MONO),
+        )
+
     fig.update_layout(
-        **_dark_layout("Model Metrics Over Time"),
-        yaxis=dict(title="Log-Loss", gridcolor="#2A2A31", color="#A7A39B"),
-        yaxis2=dict(title="Accuracy", overlaying="y", side="right", gridcolor="#2A2A31", color="#A7A39B"),
-        xaxis=dict(gridcolor="#2A2A31", color="#A7A39B"),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color="#A7A39B")),
+        template="tempo",
         height=280,
+        margin=dict(l=10, r=110, t=30, b=10),
+        showlegend=True,
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            font=dict(color=_MUTED, size=11),
+            orientation="h", yanchor="top", y=1.12, xanchor="left", x=0,
+        ),
+        yaxis=dict(
+            title="RPS (lower = better)",
+            tickformat=".3f",
+            gridcolor=_BORDER,
+            color=_MUTED,
+            tickfont=dict(family=_MONO, size=10, color=_MUTED),
+            range=[0, max(b_home + 0.05, (max(points_y) if points_y else 0.5) + 0.05)],
+        ),
+        xaxis=dict(
+            range=[x0, x1],
+            tickformat="%b %d\n%Y",
+            tickfont=dict(family=_MONO, size=10, color=_MUTED),
+            color=_MUTED,
+            gridcolor=_BORDER,
+        ),
     )
     return fig
 
 
-def _outcome_distribution(df: pd.DataFrame) -> go.Figure:
-    if df.empty:
-        return go.Figure()
-    counts = df["outcome"].value_counts().reindex(["home", "draw", "away"], fill_value=0)
-    fig = go.Figure(go.Bar(
-        x=["Home Win", "Draw", "Away Win"],
-        y=counts.values,
-        marker_color=["#4CA882", "#6B8ABF", "#C9645C"],
-        text=counts.values,
-        textposition="outside",
-        textfont=dict(color="#F4F1EA", family="'JetBrains Mono', monospace"),
-    ))
-    fig.update_layout(
-        **_dark_layout("WC2026 Results So Far"),
-        xaxis=dict(color="#A7A39B"),
-        yaxis=dict(gridcolor="#2A2A31", color="#A7A39B"),
-        height=240,
-    )
-    return fig
-
+# ── Page renderer ─────────────────────────────────────────────────────────────
 
 def render(theme=DARK) -> None:
     st.markdown(
         '<div class="page-header">'
         "<h1>Model Report</h1>"
-        '<p class="subtitle">Model performance, calibration, and prediction history</p>'
+        '<p class="subtitle">'
+        "Calibration quality, prediction drivers, and honest performance against baselines"
+        "</p>"
         "</div>",
         unsafe_allow_html=True,
     )
 
-    metrics_df = _load_metrics()
-    results_df = _load_recent_results()
     registry = list_registry()
-
     if not registry:
         st.markdown(
             '<div class="no-data"><h3>No model trained yet</h3>'
-            "<p>Run <code>python pipelines/refresh.py</code> to train the model.</p>"
-            "</div>",
+            "<p>Run <code>python pipelines/refresh.py</code> to train.</p></div>",
             unsafe_allow_html=True,
         )
         return
 
-    # Latest model metrics
-    latest = registry[-1]
-    ll = latest.get("log_loss_test", 0)
-    acc = latest.get("accuracy_test", 0)
-    brier = latest.get("brier_test", 0)
-    n_train = latest.get("n_train", 0)
-    n_test = latest.get("n_test", 0)
-    model_type = latest.get("model_type", "")
-    created_at = (latest.get("created_at") or "")[:19]
-
-    # Load RPS from holdout artifact (written by scripts/compute_holdout_metrics.py)
-    holdout = _load_holdout_summary()
-    rps = holdout.get("rps_test")
-
-    # Top metric cards — RPS is the headline per §0.5
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        rps_label = f"{rps:.4f}" if rps is not None else "run script"
-        st.metric("RPS (Test)", rps_label,
-                  help="Ranked Probability Score — primary metric. Lower is better. Uniform baseline ~0.333.")
-    with col2:
-        st.metric("Log-Loss", f"{ll:.4f}")
-    with col3:
-        st.metric("Brier Score", f"{brier:.4f}")
-    with col4:
-        st.metric("Accuracy", f"{acc:.1%}",
-                  help="Secondary metric only — not the headline per post-council review.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Reliability diagram — the credibility centrepiece (replaces accuracy gauge per §0.5)
+    holdout  = _load_holdout_summary()
     cal_df, conf_df = _load_holdout_calibration()
-    if not cal_df.empty:
-        st.markdown('<div class="sec-heading">Reliability Diagram · Confidence Distribution</div>',
-                    unsafe_allow_html=True)
-        st.markdown(
-            '<p style="font-size:0.78rem;color:var(--text-muted);margin:-0.5rem 0 0.75rem;">'
-            'Points above the gold diagonal = model under-predicts that outcome; '
-            'below = over-predicts. Marker size scales with sample count per bin.</p>',
-            unsafe_allow_html=True,
-        )
-        st.plotly_chart(_reliability_diagram(cal_df, conf_df), use_container_width=True)
-    else:
-        st.info("Run `python scripts/compute_holdout_metrics.py` to generate the reliability diagram.")
+    hist_df  = _load_metrics_history()
+    baselines = _compute_baselines(cal_df)
 
-    # Baselines comparison — text only, no gauge
-    rps_str = f"{rps:.4f}" if rps is not None else "run script"
-    beats = rps is not None and rps < 0.333
-    beats_html = '&nbsp; <span style="color:var(--win);">beats uniform</span>' if beats else ""
+    # ── 1. Lower-third metric strip ───────────────────────────────────────────
+    if holdout:
+        st.markdown(_metric_strip_html(holdout, baselines), unsafe_allow_html=True)
+    else:
+        st.info("Run `python scripts/compute_holdout_metrics.py` to generate the RPS headline.")
+
+    # ── 2. Reliability diagram + confidence histogram ─────────────────────────
     st.markdown(
-        f'<div style="font-size:0.78rem;color:var(--text-muted);padding:0.25rem 0 1rem;">'
-        f'<strong style="color:var(--text);">RPS baselines</strong> &nbsp;|&nbsp; '
-        f'Uniform (1/3 each): ~0.333 &nbsp;|&nbsp; '
-        f'Always-home: ~0.300 &nbsp;|&nbsp; '
-        f'<span style="color:var(--gold);font-family:var(--ff-mono);">Model: {rps_str}</span>'
-        f'{beats_html}'
-        f'</div>',
+        '<div class="sec-heading">Reliability Diagram · Confidence Distribution</div>',
         unsafe_allow_html=True,
     )
-
-    # WC2026 results distribution (half-width — leave room for future metrics)
-    col_results, _ = st.columns([1, 1])
-    with col_results:
-        st.markdown('<div class="sec-heading">WC2026 Results So Far</div>', unsafe_allow_html=True)
-        if not results_df.empty:
-            st.plotly_chart(_outcome_distribution(results_df), use_container_width=True)
-        else:
-            st.markdown(
-                '<p style="color:var(--text-muted);font-size:0.82rem;">'
-                "No WC2026 results ingested yet.</p>",
-                unsafe_allow_html=True,
-            )
-
-    # Metrics timeline
-    if len(metrics_df) > 1:
-        st.markdown('<div class="sec-heading">Training History</div>', unsafe_allow_html=True)
-        st.plotly_chart(_metrics_timeline(metrics_df), use_container_width=True)
-
-    # Model registry table
-    st.markdown('<div class="sec-heading">Model Registry</div>', unsafe_allow_html=True)
-    if registry:
-        reg_df = pd.DataFrame([{
-            "Version": r.get("version", ""),
-            "Type": r.get("model_type", ""),
-            "Log-Loss": f"{r.get('log_loss_test', 0):.4f}",
-            "Accuracy": f"{r.get('accuracy_test', 0):.1%}",
-            "Brier": f"{r.get('brier_test', 0):.4f}",
-            "Train N": f"{r.get('n_train', 0):,}",
-            "Created": r.get("created_at", "")[:19],
-        } for r in registry])
-        st.dataframe(
-            reg_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # Recent WC2026 results table
-    if not results_df.empty:
-        st.markdown('<div class="sec-heading">Recent WC2026 Results</div>', unsafe_allow_html=True)
-        results_df["result"] = (
-            results_df["home_score"].astype(str)
-            + " – "
-            + results_df["away_score"].astype(str)
-        )
-        st.dataframe(
-            results_df[["date", "home_team", "result", "away_team", "outcome"]].rename(columns={
-                "date": "Date", "home_team": "Home", "result": "Score",
-                "away_team": "Away", "outcome": "Outcome",
-            }),
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    # Data stamp
-    data_ts = created_at if registry else "—"
     st.markdown(
-        f'<p class="data-stamp" style="margin-top:1rem;">Data as of {data_ts} · '
-        f'Updates daily via batch · <code>python pipelines/refresh.py</code></p>',
+        '<p style="font-size:0.78rem;color:var(--text-muted);margin:-0.4rem 0 0.9rem;">'
+        "Points above the gold diagonal → model under-predicts that outcome; "
+        "below → over-predicts. Marker size scales with sample count per bin.</p>",
+        unsafe_allow_html=True,
+    )
+    if not cal_df.empty:
+        st.plotly_chart(
+            _reliability_diagram(cal_df, conf_df),
+            use_container_width=True,
+        )
+    else:
+        st.markdown(
+            '<div class="no-data" style="padding:2rem;">'
+            "<h3>Calibration data not generated yet</h3>"
+            "<p>Run <code>python scripts/compute_holdout_metrics.py</code></p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ── 3. RPS-vs-baseline timeline ───────────────────────────────────────────
+    st.markdown(
+        '<div class="sec-heading">RPS vs Baselines</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<p style="font-size:0.78rem;color:var(--text-muted);margin:-0.4rem 0 0.9rem;">'
+        "Gold = model · Dashed = theoretical baselines computed from holdout class distribution. "
+        "Green zone = model territory (beats uniform).</p>",
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(
+        _rps_timeline(hist_df, holdout, baselines),
+        use_container_width=True,
+    )
+
+    # ── 4. Model registry ─────────────────────────────────────────────────────
+    st.markdown('<div class="sec-heading">Model Registry</div>', unsafe_allow_html=True)
+    reg_rows = []
+    for r in registry:
+        rps_cell = f"{holdout['rps_test']:.4f}" if holdout.get("rps_test") else "—"
+        reg_rows.append({
+            "Version":   r.get("version", "")[:32],
+            "Type":      r.get("model_type", ""),
+            "RPS":       rps_cell,
+            "Log-Loss":  f"{r.get('log_loss_test', 0):.4f}",
+            "Brier":     f"{r.get('brier_test', 0):.4f}",
+            "Accuracy":  f"{r.get('accuracy_test', 0):.1%}",
+            "Train N":   f"{r.get('n_train', 0):,}",
+            "Created":   str(r.get("created_at", ""))[:19],
+        })
+    st.dataframe(pd.DataFrame(reg_rows), use_container_width=True, hide_index=True)
+
+    # ── 5. Data stamp ─────────────────────────────────────────────────────────
+    created_at = str(holdout.get("created_at", registry[-1].get("created_at", "")))[:19]
+    st.markdown(
+        f'<p class="data-stamp" style="margin-top:1.25rem;">'
+        f"Data as of <code>{created_at}</code> · Updates daily via batch</p>",
         unsafe_allow_html=True,
     )
