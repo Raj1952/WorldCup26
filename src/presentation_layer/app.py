@@ -28,6 +28,7 @@ from src.presentation_layer.pages import model_report
 from src.presentation_layer.pages import match_detail
 from src.presentation_layer.pages import match_space
 from src.presentation_layer.pages import bracket
+from src.presentation_layer.pages import share
 
 load_dotenv()
 
@@ -52,6 +53,7 @@ _ROUTES = [
     ("match-detail", "search",      "Match Detail", False),
     ("model-report", "bar-chart-2", "Model Report", False),
     ("bracket",      "trophy",      "Bracket",      False),
+    ("share-card",   "share-2",     "Share Card",   False),
 ]
 _VALID_PAGES = {r[0] for r in _ROUTES} | {"foundation"}
 
@@ -238,5 +240,7 @@ elif page == "model-report":
     model_report.render(theme=DARK)
 elif page == "bracket":
     bracket.render(theme=DARK)
+elif page == "share-card":
+    share.render(theme=DARK)
 elif page == "foundation":
     _render_foundation_demo()
