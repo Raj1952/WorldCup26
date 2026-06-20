@@ -422,8 +422,11 @@ def render(theme=DARK) -> None:
     registry = list_registry()
     if not registry:
         st.markdown(
-            '<div class="no-data"><h3>No model trained yet</h3>'
-            "<p>Run <code>python pipelines/refresh.py</code> to train.</p></div>",
+            '<div class="no-data">'
+            "<h3>Model artifacts are being generated</h3>"
+            "<p>They’ll appear after the next daily refresh — "
+            "predictions update every morning.</p>"
+            "</div>",
             unsafe_allow_html=True,
         )
         return
@@ -437,7 +440,13 @@ def render(theme=DARK) -> None:
     if holdout:
         st.markdown(_metric_strip_html(holdout, baselines), unsafe_allow_html=True)
     else:
-        st.info("Run `python scripts/compute_holdout_metrics.py` to generate the RPS headline.")
+        st.markdown(
+            '<div class="no-data" style="padding:1.25rem;">'
+            "<h3>Performance metrics are being generated</h3>"
+            "<p>They'll appear after the next daily refresh.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     # ── 2. Reliability diagram + confidence histogram ─────────────────────────
     st.markdown(
@@ -458,8 +467,8 @@ def render(theme=DARK) -> None:
     else:
         st.markdown(
             '<div class="no-data" style="padding:2rem;">'
-            "<h3>Calibration data not generated yet</h3>"
-            "<p>Run <code>python scripts/compute_holdout_metrics.py</code></p>"
+            "<h3>Calibration data is being generated</h3>"
+            "<p>It'll appear after the next daily refresh.</p>"
             "</div>",
             unsafe_allow_html=True,
         )

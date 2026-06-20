@@ -337,14 +337,11 @@ def render(theme=DARK) -> None:
     pred_ok = Path(_PRED_PATH).exists()
 
     if not db_ok or not pred_ok:
-        missing = []
-        if not db_ok:   missing.append(f"<code>{_DB_PATH}</code>")
-        if not pred_ok: missing.append(f"<code>{_PRED_PATH}</code>")
         st.markdown(
             '<div class="no-data">'
-            '<h3>Simulation not yet available</h3>'
-            f'<p>Missing: {" and ".join(missing)}</p>'
-            '<p>Run <code>python pipelines/refresh.py</code> first.</p>'
+            '<h3>Tournament simulation is updating</h3>'
+            '<p>Results will appear after the next daily refresh — '
+            'predictions update every morning.</p>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -356,10 +353,8 @@ def render(theme=DARK) -> None:
     if df is None or df.empty:
         st.markdown(
             '<div class="no-data">'
-            '<h3>Simulation failed</h3>'
-            '<p>Check that <code>data/tempo.db</code> and '
-            '<code>predictions.parquet</code> are valid. '
-            'Re-run <code>python pipelines/refresh.py</code>.</p>'
+            '<h3>Simulation results unavailable</h3>'
+            '<p>Tournament simulation will be ready after the next daily refresh.</p>'
             '</div>',
             unsafe_allow_html=True,
         )

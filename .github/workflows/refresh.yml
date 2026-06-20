@@ -21,7 +21,7 @@ jobs:
     steps:
       # ── Checkout ───────────────────────────────────────────────────────────
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1         # shallow clone is fine; we only push one commit
 
@@ -31,23 +31,30 @@ jobs:
         with:
           python-version: '3.13'
 
+      # ── Compute weekly cache key ────────────────────────────────────────────
+      - name: Compute weekly cache key
+        id: week
+        run: echo "val=$(date -u '+%Y-W%V')" >> "$GITHUB_OUTPUT"
+
       # ── pip cache ──────────────────────────────────────────────────────────
       - name: Cache pip packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/pip
           key: pip-${{ hashFiles('requirements.txt') }}
           restore-keys: pip-
 
-      # ── Data cache ─────────────────────────────────────────────────────────
-      # Cache data/ so we don't re-download 50 k historical rows every run.
-      # Key rotates weekly: stale data gets a full rebuild every seven days.
-      - name: Cache data directory
-        uses: actions/cache@v4
+      # ── Raw data cache ─────────────────────────────────────────────────────
+      # Cache data/raw/ (gitignored historical CSVs) — rotates weekly so
+      # fresh data is pulled every seven days without re-downloading daily.
+      # Do NOT cache data/tempo.db — it is committed to the repo and comes
+      # from git checkout; caching it would overwrite the live version.
+      - name: Cache raw historical data
+        uses: actions/cache@v5
         with:
-          path: data/
-          key: tempo-data-${{ github.run_id }}
-          restore-keys: tempo-data-
+          path: data/raw/
+          key: tempo-raw-${{ steps.week.outputs.val }}
+          restore-keys: tempo-raw-
 
       # ── Install ─────────────────────────────────────────────────────────────
       - name: Install dependencies
@@ -60,23 +67,27 @@ jobs:
           # secret in repo Settings → Secrets → Actions. Without it the
           # pipeline falls back to the openfootball public feed automatically.
           FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
-          # Optional: Supermemory persistence (§ Step 8 in pipelines/refresh.py)
+          # Optional: Supermemory persistence
           SUPERMEMORY_API_KEY: ${{ secrets.SUPERMEMORY_API_KEY }}
         run: python pipelines/refresh.py
 
       # ── Commit outputs ─────────────────────────────────────────────────────
-      # Stages only the files the app reads: predictions.parquet and the
-      # reports parquets (holdout metrics, calibration data).
+      # Stages all app-readable outputs: predictions.parquet, the SQLite
+      # database, model artifacts, and report parquets.
       # Skips the commit entirely if nothing changed (idempotent runs).
+      # [skip ci] in the message prevents this commit from re-triggering
+      # the workflow.
       - name: Commit updated outputs
         run: |
           git config user.name  "tempo-bot"
           git config user.email "tempo-bot@users.noreply.github.com"
 
-          git add predictions.parquet
-          git add artifacts/reports/holdout_summary.parquet    || true
-          git add artifacts/reports/holdout_calibration.parquet || true
-          git add artifacts/reports/holdout_confidence.parquet  || true
+          git add predictions.parquet                                  || true
+          git add data/tempo.db                                        || true
+          git add artifacts/models/                                    || true
+          git add artifacts/reports/holdout_summary.parquet            || true
+          git add artifacts/reports/holdout_calibration.parquet        || true
+          git add artifacts/reports/holdout_confidence.parquet         || true
 
           # Exit cleanly if nothing changed (e.g. no new results today)
           if git diff --staged --quiet; then
@@ -84,5 +95,5 @@ jobs:
             exit 0
           fi
 
-          git commit -m "chore: daily refresh $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git commit -m "chore: daily refresh $(date -u '+%Y-%m-%d') [skip ci]"
           git push

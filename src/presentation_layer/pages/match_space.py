@@ -163,7 +163,7 @@ def render(theme=DARK) -> None:
         '<div class="page-header">'
         "<h1>Match Space</h1>"
         '<p class="subtitle">'
-        "Win / Draw / Loss probability space · click a point or select below to inspect"
+        "Win / Draw / Loss probability space · use the selector below to inspect a match"
         "</p>"
         "</div>",
         unsafe_allow_html=True,
@@ -211,10 +211,23 @@ def render(theme=DARK) -> None:
         key="ternary_chart",
     )
 
-    # Resolve click → update session_state
+    # Resolve click → update session_state.
+    # Plotly ternary doesn't support dragmode="select", so point_index may be
+    # None; fall back to point_number then customdata (which holds the row index).
     if event and event.selection and event.selection.points:
         pt      = event.selection.points[0]
         new_pos = pt.get("point_index")
+        if new_pos is None:
+            new_pos = pt.get("point_number")
+        if new_pos is None:
+            cd = pt.get("customdata")
+            if isinstance(cd, (list, tuple)) and cd:
+                new_pos = int(cd[0])
+            elif cd is not None:
+                try:
+                    new_pos = int(cd)
+                except (TypeError, ValueError):
+                    new_pos = None
         if new_pos is not None and new_pos != selected:
             st.session_state[_SK] = new_pos
             st.rerun()

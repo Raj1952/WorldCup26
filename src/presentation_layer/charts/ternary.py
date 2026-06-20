@@ -132,7 +132,7 @@ def ternary_scatter(
             bordercolor = _BORDER,
             font        = dict(family="'Inter',sans-serif", size=12, color=_TEXT),
         ),
-        customdata    = df.index.tolist(),
+        customdata    = [[i] for i in range(len(df))],
     ))
 
     # Corner labels and axis styling
@@ -176,7 +176,7 @@ def ternary_scatter(
             text = (
                 "Match Space — upcoming group-stage matches<br>"
                 "<sup style='font-size:10px;color:#A7A39B'>"
-                "Click a point to filter · "
+                "Select a match below to inspect · "
                 "<span style='color:#4CA882'>●</span> Home favoured  "
                 "<span style='color:#6B8ABF'>●</span> Draw likely  "
                 "<span style='color:#C9645C'>●</span> Away favoured"
@@ -185,7 +185,8 @@ def ternary_scatter(
             font = dict(family="'Archivo',sans-serif", size=14, color=_TEXT),
             x    = 0.01,
         ),
-        dragmode      = "select",
+        # dragmode="select" is not supported on ternary subplots (Plotly limitation).
+        # Interaction via Streamlit on_select + the selectbox below the chart.
     )
 
     return fig

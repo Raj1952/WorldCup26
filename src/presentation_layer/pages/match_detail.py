@@ -18,7 +18,7 @@ _PREDICTIONS_PATH = Path("predictions.parquet")
 
 _REQUIRED_COLS = frozenset({
     "match_id", "date", "home_team", "away_team",
-    "p_home", "p_draw", "p_away", "is_projected",
+    "p_home", "p_draw", "p_away",
     "model_version", "created_at",
 })
 
@@ -226,6 +226,14 @@ def render(theme=DARK) -> None:
     with meta_cols[2]:
         created = str(row.get("created_at", "—"))[:19]
         st.metric("Generated", created)
+
+    st.markdown(
+        '<p style="font-size:0.78rem;color:var(--text-muted);margin:0.4rem 0 0;">'
+        "Confidence reflects how decisive the model’s prediction is — "
+        "100% means all probability on one outcome, "
+        "33% means all three are equally likely.</p>",
+        unsafe_allow_html=True,
+    )
 
     # ── Data stamp ────────────────────────────────────────────────────────────
     try:

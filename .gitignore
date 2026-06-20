@@ -5,15 +5,13 @@
 # Virtual environment
 .venv/
 
-# Raw data and large pipeline outputs
+# Raw data — large historical CSVs, never committed
 data/raw/
-data/tempo.db
 
-# Model artifacts
-artifacts/models/*.pkl
-artifacts/models/*.joblib
-artifacts/models/*.json
-artifacts/models/*.ubj
+# Model artifacts and database are committed (small enough; Streamlit Cloud reads them)
+# Do NOT add data/tempo.db, artifacts/models/*, or artifacts/reports/*.parquet here.
+
+# HTML reports — not read by the app
 artifacts/reports/*.html
 
 # Python caches
