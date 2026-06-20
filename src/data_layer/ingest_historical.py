@@ -122,8 +122,11 @@ def ingest_historical(
     })
     df["home_team"] = df["home_raw"].apply(resolve_alias)
     df["away_team"] = df["away_raw"].apply(resolve_alias)
-    df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce").fillna(0).astype(int)
-    df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce").fillna(0).astype(int)
+    # Drop rows with no score — martj42 includes future scheduled fixtures with NaN scores;
+    # treating them as 0-0 draws corrupts Elo and form features.
+    df = df[df["home_score"].notna() & df["away_score"].notna()].copy()
+    df["home_score"] = pd.to_numeric(df["home_score"], errors="coerce").astype(int)
+    df["away_score"] = pd.to_numeric(df["away_score"], errors="coerce").astype(int)
     df["outcome"] = df.apply(
         lambda r: derive_outcome(r["home_score"], r["away_score"]), axis=1
     )

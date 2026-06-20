@@ -97,6 +97,12 @@ def _upsert_fixture(conn: sqlite3.Connection, rec: dict) -> None:
 
 def _upsert_result_to_matches(conn: sqlite3.Connection, rec: dict) -> None:
     """Write a completed WC2026 result into the shared matches table."""
+    # Remove any stale placeholder row with a different match_id for the same fixture
+    # (historical ingest pre-populates future fixtures with 0-0 under a different hash scheme)
+    conn.execute(
+        "DELETE FROM matches WHERE date=? AND home_team=? AND away_team=? AND match_id!=?",
+        (rec["date"], rec["home_team"], rec["away_team"], rec["match_id"]),
+    )
     conn.execute(
         """INSERT OR REPLACE INTO matches
            (match_id,date,home_team,away_team,home_score,away_score,
