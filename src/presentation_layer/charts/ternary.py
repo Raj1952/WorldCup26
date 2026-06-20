@@ -151,6 +151,7 @@ def ternary_scatter(
     )
 
     fig.update_layout(
+        template      = "tempo",
         ternary = dict(
             bgcolor = "rgba(20,20,23,0.6)",
             aaxis   = {**axis_style, "title": dict(
@@ -169,8 +170,6 @@ def ternary_scatter(
                              color=_LOSS, weight="bold"),
             )},
         ),
-        paper_bgcolor = _BG,
-        plot_bgcolor  = _BG,
         height        = 460,
         margin        = dict(l=60, r=60, t=60, b=20),
         title         = dict(
