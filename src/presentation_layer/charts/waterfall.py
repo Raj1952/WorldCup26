@@ -157,6 +157,7 @@ def prediction_waterfall(row: pd.Series) -> go.Figure:
     )
 
     fig.update_layout(
+        template      = "tempo",
         title = dict(
             text      = (
                 f"<b>{home}</b> vs {away}"
@@ -166,9 +167,6 @@ def prediction_waterfall(row: pd.Series) -> go.Figure:
             font      = dict(family="'Archivo',sans-serif", size=14, color=_TEXT),
             x         = 0.01,
         ),
-        paper_bgcolor = _BG,
-        plot_bgcolor  = _BG,
-        font          = dict(family="'Inter',sans-serif", color=_TEXT),
         xaxis         = dict(
             showgrid     = False,
             tickfont     = dict(family="'Inter',sans-serif", size=11, color=_MUTED),

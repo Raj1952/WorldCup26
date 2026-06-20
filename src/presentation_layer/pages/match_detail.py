@@ -1,4 +1,4 @@
-"""Match Detail page — deep dive into a single prediction with SHAP factors."""
+"""Match Detail page — fixture header, calibrated prob bar, prediction waterfall."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from src.presentation_layer.theme import DARK
@@ -28,60 +27,101 @@ def _load_predictions() -> pd.DataFrame:
     return df
 
 
-def _dark_layout() -> dict:
-    return dict(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_family="'Inter', sans-serif",
-        font_color="#F4F1EA",
-        margin=dict(l=10, r=10, t=30, b=10),
-    )
+def _fixture_header_html(row: pd.Series) -> str:
+    """Full-width fixture header card — hero size (48px flags, 1.3rem names)."""
+    home = str(row["home_team"])
+    away = str(row["away_team"])
+    group = str(row.get("group_label", "WC"))
+    date  = str(row["date"])
+    kick  = str(row.get("kickoff_time", ""))
+    kick_str = f" · {kick} UTC" if kick else ""
+
+    hf = flag_img(get_flag_code(home), width=48, team_name=home)
+    af = flag_img(get_flag_code(away), width=48, team_name=away)
+
+    return f"""
+<div class="match-card hero-card">
+  <div class="match-card-rail"></div>
+  <div class="match-card-body">
+    <div class="match-chip">WC26 · GRP {group} · {date}{kick_str}</div>
+    <div class="match-teams">
+      <div class="team-block">
+        <span class="team-flag">{hf}</span>
+        <span class="team-name hero-team-name">{home}</span>
+      </div>
+      <span class="match-vs">VS</span>
+      <div class="team-block away">
+        <span class="team-flag">{af}</span>
+        <span class="team-name hero-team-name">{away}</span>
+      </div>
+    </div>
+  </div>
+</div>"""
 
 
-def _factors_bar(factors: list[dict], home: str) -> go.Figure:
+def _prob_bar_html(p_h: float, p_d: float, p_a: float,
+                   home: str, away: str) -> str:
+    """Full-width calibrated probability bar — hero height (36px)."""
+    w_h = f"{p_h * 100:.1f}%"
+    w_d = f"{p_d * 100:.1f}%"
+    w_a = f"{p_a * 100:.1f}%"
+    pct_h = f"{p_h:.0%}"
+    pct_d = f"{p_d:.0%}"
+    pct_a = f"{p_a:.0%}"
+
+    # Determine favored team/outcome
+    best = max(p_h, p_d, p_a)
+    if best == p_h:
+        fav_label = home
+        fav_flag  = flag_img(get_flag_code(home), width=18, team_name=home)
+        fav_pct   = pct_h
+    elif best == p_d:
+        fav_label = "Draw"
+        fav_flag  = ""
+        fav_pct   = pct_d
+    else:
+        fav_label = away
+        fav_flag  = flag_img(get_flag_code(away), width=18, team_name=away)
+        fav_pct   = pct_a
+
+    fav_inner = f"{fav_flag} {fav_label}" if fav_flag else fav_label
+
+    return f"""
+<div style="margin-bottom:0.85rem;">
+  <div class="prob-bar-track" style="height:36px;"
+       role="img" aria-label="{home} {pct_h} · Draw {pct_d} · {away} {pct_a}">
+    <div class="prob-seg seg-home" style="width:{w_h};">{pct_h}</div>
+    <div class="prob-seg seg-draw" style="width:{w_d};">{pct_d}</div>
+    <div class="prob-seg seg-away" style="width:{w_a};">{pct_a}</div>
+  </div>
+  <div class="prob-bar-labels">
+    <span class="prob-label">Home win</span>
+    <span class="prob-label">Draw</span>
+    <span class="prob-label">Away win</span>
+  </div>
+</div>
+<div class="favored-chip">
+  <span class="favored-dot"></span>
+  Favored: {fav_inner} {fav_pct}
+</div>"""
+
+
+def _factor_chips_html(factors: list[dict]) -> str:
     if not factors:
-        return go.Figure()
-    labels = [f["label"] for f in factors]
-    impacts = [f["impact"] * (1 if f["direction"] == "+" else -1) for f in factors]
-    colors = ["#4CA882" if v >= 0 else "#C9645C" for v in impacts]
-
-    fig = go.Figure(go.Bar(
-        x=impacts,
-        y=labels,
-        orientation="h",
-        marker_color=colors,
-        marker_line=dict(width=0),
-        text=[f"{abs(v):.3f}" for v in impacts],
-        textposition="outside",
-        textfont=dict(family="'JetBrains Mono', monospace", color="#A7A39B", size=10),
-        hovertemplate="%{y}: <b>%{x:.4f}</b><extra></extra>",
-    ))
-    fig.update_layout(
-        **_dark_layout(),
-        xaxis=dict(
-            title="Feature contribution",
-            gridcolor="#2A2A31",
-            color="#A7A39B",
-            zeroline=True,
-            zerolinecolor="#3A3A45",
-            zerolinewidth=1.5,
-            tickfont=dict(family="'JetBrains Mono',monospace", size=10),
-        ),
-        yaxis=dict(color="#A7A39B", autorange="reversed",
-                   tickfont=dict(family="'Inter',sans-serif", size=11)),
-        height=max(220, len(factors) * 52),
-        title_text=f"Key factors",
-        title_font=dict(size=12, color="#A7A39B", family="'Inter',sans-serif"),
-    )
-    return fig
+        return ""
+    chips = ""
+    for f in factors[:5]:
+        cls = "fpos" if f.get("direction", "+") == "+" else "fneg"
+        arrow = "↑" if f.get("direction", "+") == "+" else "↓"
+        chips += f'<span class="factor-chip {cls}">{arrow} {f["label"]}</span>'
+    return f'<div class="factors-row" style="margin-top:0.6rem;">{chips}</div>'
 
 
 def render(theme=DARK) -> None:
     st.markdown(
         '<div class="page-header">'
         "<h1>Match Detail</h1>"
-        '<p class="subtitle">Deep prediction analysis with explainability factors</p>'
+        '<p class="subtitle">Fixture breakdown, calibrated probabilities, and prediction drivers</p>'
         "</div>",
         unsafe_allow_html=True,
     )
@@ -96,98 +136,81 @@ def render(theme=DARK) -> None:
         )
         return
 
-    # Match selector
-    match_options = {
-        f"{row['home_team']} vs {row['away_team']} ({row['date']})": idx
-        for idx, row in df.iterrows()
-    }
-    selected_label = st.selectbox("Select a match:", list(match_options.keys()))
-    if not selected_label:
-        return
+    # ── Match selector ────────────────────────────────────────────────────────
+    # Filter to known-team matches (group A-L) and sort by date
+    known = df[df["group_label"].str.match(r"^[A-L]$", na=False)].copy()
+    known = known.sort_values(["date", "kickoff_time"]).reset_index(drop=True)
 
-    row = df.loc[match_options[selected_label]]
-    home = row["home_team"]
-    away = row["away_team"]
-    p_h = float(row["p_home"])
-    p_d = float(row["p_draw"])
-    p_a = float(row["p_away"])
-    hf = flag_img(get_flag_code(home), width=48, team_name=home)
-    af = flag_img(get_flag_code(away), width=48, team_name=away)
-    factors = row.get("top_factors", [])
+    options = [
+        f"{row['home_team']} vs {row['away_team']}  ·  {row['date']}"
+        for _, row in known.iterrows()
+    ]
+    sel = st.selectbox("Choose a match", options, label_visibility="collapsed")
+    sel_idx = options.index(sel)
+    row = known.iloc[sel_idx]
 
-    # Match header
-    st.markdown(f"""
-<div class="match-card" style="margin:1rem 0;">
-  <div class="match-card-rail"></div>
-  <div class="match-card-body">
-    <div class="match-chip">WC26 · {row.get("group_label","WC")} · {row["date"]}</div>
-    <div class="match-teams">
-      <div class="team-block">
-        <span class="team-flag">{hf}</span>
-        <span class="team-name" style="font-size:1.3rem">{home}</span>
-      </div>
-      <span class="match-vs" style="font-size:1rem">VS</span>
-      <div class="team-block away">
-        <span class="team-flag">{af}</span>
-        <span class="team-name" style="font-size:1.3rem">{away}</span>
-      </div>
-    </div>
-  </div>
-</div>""", unsafe_allow_html=True)
+    home  = str(row["home_team"])
+    away  = str(row["away_team"])
+    p_h   = float(row["p_home"])
+    p_d   = float(row["p_draw"])
+    p_a   = float(row["p_away"])
+    facts = row.get("top_factors", [])
 
-    # ── Probability summary (text-only per §0.5 — no donut) ─────────────────
-    col_probs, col_wf = st.columns([1, 2])
-    with col_probs:
-        st.markdown('<div class="sec-heading">Outcome Probabilities</div>', unsafe_allow_html=True)
-        for label, prob, color in [
-            (f"{home} win", p_h, "var(--win)"),
-            ("Draw",        p_d, "var(--draw)"),
-            (f"{away} win", p_a, "var(--loss)"),
-        ]:
-            st.markdown(f"""
-<div style="display:flex;justify-content:space-between;align-items:center;
-            padding:0.6rem 0.9rem;margin-bottom:6px;border-radius:8px;
-            border:1px solid var(--border);background:var(--surface);">
-  <span style="color:{color};font-weight:600;font-size:0.88rem;">{label}</span>
-  <span style="font-family:var(--ff-mono);font-size:1.1rem;
-               font-weight:700;color:{color};">{prob:.1%}</span>
-</div>""", unsafe_allow_html=True)
+    # ── Fixture header card ───────────────────────────────────────────────────
+    st.markdown(_fixture_header_html(row), unsafe_allow_html=True)
+
+    # ── Calibrated probability bar ────────────────────────────────────────────
+    st.markdown(
+        '<div class="sec-heading">Calibrated outcome probabilities</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(_prob_bar_html(p_h, p_d, p_a, home, away), unsafe_allow_html=True)
+
+    # ── Factor chips ──────────────────────────────────────────────────────────
+    if facts:
+        st.markdown(_factor_chips_html(facts), unsafe_allow_html=True)
+
+    st.markdown("<div style='height:1.25rem;'></div>", unsafe_allow_html=True)
 
     # ── Waterfall ─────────────────────────────────────────────────────────────
-    with col_wf:
-        st.markdown('<div class="sec-heading">Prediction waterfall — base rate → calibrated</div>',
-                    unsafe_allow_html=True)
-        if factors:
-            fig_wf = prediction_waterfall(row)
-            st.plotly_chart(fig_wf, use_container_width=True,
-                            key=f"wf_{row.get('match_id', 'detail')}")
-        else:
-            st.markdown(
-                '<p style="color:var(--text-muted);font-size:0.82rem;">'
-                "Factor data not available. Re-run <code>python pipelines/refresh.py</code>.</p>",
-                unsafe_allow_html=True,
-            )
+    st.markdown(
+        '<div class="sec-heading">Prediction waterfall — base rate → calibrated output</div>',
+        unsafe_allow_html=True,
+    )
+    if facts:
+        fig = prediction_waterfall(row)
+        st.plotly_chart(fig, use_container_width=True,
+                        key=f"wf_{row.get('match_id', sel_idx)}")
+    else:
+        st.markdown(
+            '<div class="no-data" style="padding:2rem;">'
+            "<h3>Factor data not available</h3>"
+            "<p>Re-run <code>python pipelines/refresh.py</code> to generate prediction drivers.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
-    # Model info
+    # ── Prediction metadata ───────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<div class="sec-heading">Prediction Metadata</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sec-heading">Prediction metadata</div>', unsafe_allow_html=True)
     meta_cols = st.columns(3)
     with meta_cols[0]:
-        st.metric("Model Version", row.get("model_version", "—")[:16])
+        ver = str(row.get("model_version", "—"))[:20]
+        st.metric("Model version", ver)
     with meta_cols[1]:
-        created = str(row.get("created_at", "—"))[:19]
-        st.metric("Generated At", created)
-    with meta_cols[2]:
         best_p = max(p_h, p_d, p_a)
         st.metric("Confidence", f"{best_p:.1%}")
-
-    # Data stamp
-    try:
-        created = pd.to_datetime(row.get("created_at", "")).strftime("%Y-%m-%d %H:%M UTC")
-    except Exception:
+    with meta_cols[2]:
         created = str(row.get("created_at", "—"))[:19]
+        st.metric("Generated", created)
+
+    # ── Data stamp ────────────────────────────────────────────────────────────
+    try:
+        ts = pd.to_datetime(row.get("created_at", "")).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        ts = str(row.get("created_at", "—"))[:19]
     st.markdown(
-        f'<p class="data-stamp" style="margin-top:1rem;">Data as of {created} · '
-        f'Updates daily via batch · <code>python pipelines/refresh.py</code></p>',
+        f'<p class="data-stamp" style="margin-top:1.25rem;">'
+        f"Data as of <code>{ts}</code> · Updates daily via batch</p>",
         unsafe_allow_html=True,
     )
