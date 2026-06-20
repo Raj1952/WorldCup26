@@ -165,8 +165,11 @@ def render(theme=DARK) -> None:
         f"{row['home_team']} vs {row['away_team']}  ·  {row['date']}"
         for _, row in known.iterrows()
     ]
+    if not options:
+        st.info("No group-stage matches with known teams.")
+        return
     sel = st.selectbox("Choose a match", options, label_visibility="collapsed")
-    sel_idx = options.index(sel)
+    sel_idx = options.index(sel) if sel in options else 0
     row = known.iloc[sel_idx]
 
     home  = str(row["home_team"])
