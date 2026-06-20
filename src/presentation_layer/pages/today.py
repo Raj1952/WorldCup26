@@ -1,4 +1,4 @@
-"""Predictions page — broadcast-grade match cards with real model output."""
+"""Predictions page — First Answer rule, One Hero, chip filters, fixture tickets."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src.presentation_layer.theme import DARK, APP_NAME
+from src.presentation_layer.theme import DARK
 from src.data_layer.team_aliases import get_flag_code
 from src.presentation_layer.flags import flag_img
 
@@ -29,14 +29,14 @@ def _load_predictions() -> pd.DataFrame:
 
 def _prob_bar_html(p_home: float, p_draw: float, p_away: float,
                    home: str, away: str) -> str:
-    min_show = 0.09
     total = p_home + p_draw + p_away
     ph = p_home / total
     pd_ = p_draw / total
     pa = p_away / total
-    h_lbl = f"{ph:.0%}" if ph >= min_show else ""
-    d_lbl = f"{pd_:.0%}" if pd_ >= min_show else ""
-    a_lbl = f"{pa:.0%}" if pa >= min_show else ""
+    MIN_SHOW = 0.09
+    h_lbl = f"{ph:.0%}" if ph >= MIN_SHOW else ""
+    d_lbl = f"{pd_:.0%}" if pd_ >= MIN_SHOW else ""
+    a_lbl = f"{pa:.0%}" if pa >= MIN_SHOW else ""
     return f"""
 <div class="prob-bar-track" role="img"
      aria-label="{home} {ph:.0%} win, Draw {pd_:.0%}, {away} {pa:.0%} win">
@@ -73,12 +73,72 @@ def _factors_html(factors: list[dict]) -> str:
     if not factors:
         return ""
     chips = "".join(
-        f'<span class="factor-chip {"fpos" if f.get("direction","+")=="+"\
-            else "fneg"}">{"↑" if f.get("direction","+")=="+"\
-            else "↓"} {f.get("label","")}</span>'
+        f'<span class="factor-chip '
+        f'{"fpos" if f.get("direction", "+") == "+" else "fneg"}">'
+        f'{"↑" if f.get("direction", "+") == "+" else "↓"} {f.get("label", "")}'
+        f'</span>'
         for f in factors[:3]
     )
     return f'<div class="factors-row">{chips}</div>'
+
+
+def _hero_card_html(row: pd.Series) -> str:
+    """Full-width hero card — next fixture, large team names, taller prob bar."""
+    home = row["home_team"]
+    away = row["away_team"]
+    p_h = float(row["p_home"])
+    p_d = float(row["p_draw"])
+    p_a = float(row["p_away"])
+    hf = flag_img(get_flag_code(home), width=44, team_name=home)
+    af = flag_img(get_flag_code(away), width=44, team_name=away)
+    group = row.get("group_label", "WC26")
+    kt = str(row.get("kickoff_time", ""))
+    date_str = str(row.get("date", ""))
+
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        is_today = date_str == str(date.today())
+        date_label = "Today" if is_today else dt.strftime("%a %d %b")
+    except Exception:
+        date_label = date_str
+        is_today = False
+
+    time_label = f" · {kt} UTC" if kt and kt not in ("00:00", "nan", "") else ""
+    kick_badge = "Today's kick-off" if is_today else "Next kick-off"
+    chip_text = f"WC26 · Grp {group} · {date_label}{time_label}"
+
+    factors = row.get("top_factors", [])
+    if isinstance(factors, str):
+        try:
+            factors = json.loads(factors)
+        except Exception:
+            factors = []
+
+    return f"""
+<div class="match-card hero-card">
+  <div class="match-card-rail"></div>
+  <div class="match-card-body">
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                flex-wrap:wrap;gap:0.5rem;margin-bottom:0.85rem;">
+      <span class="hero-badge">&#9889; {kick_badge}</span>
+      <span class="match-chip" style="margin-bottom:0;">{chip_text}</span>
+    </div>
+    <div class="match-teams" style="margin-bottom:1.1rem;">
+      <div class="team-block">
+        <span class="team-flag">{hf}</span>
+        <span class="team-name hero-team-name">{home}</span>
+      </div>
+      <span class="match-vs">VS</span>
+      <div class="team-block away">
+        <span class="team-flag">{af}</span>
+        <span class="team-name hero-team-name">{away}</span>
+      </div>
+    </div>
+    {_prob_bar_html(p_h, p_d, p_a, home, away)}
+    {_favored_html(p_h, p_d, p_a, home, away, hf, af)}
+    {_factors_html(factors)}
+  </div>
+</div>"""
 
 
 def _match_card_html(row: pd.Series) -> str:
@@ -139,152 +199,116 @@ def _no_data_banner() -> None:
   <p>Run the refresh pipeline to fetch data and generate predictions:</p>
   <p><code>python pipelines/refresh.py</code></p>
   <p style="margin-top:1rem;font-size:0.8rem;color:var(--text-muted);">
-    This downloads historical match data, trains the XGBoost model, and writes predictions.parquet.
+    Downloads historical data, trains the XGBoost model, writes predictions.parquet.
   </p>
 </div>""", unsafe_allow_html=True)
 
 
 def render(theme=DARK) -> None:
-    # ── Page header ──────────────────────────────────────────────────────
-    col_title, col_badge = st.columns([3, 1])
-    with col_title:
-        st.markdown(
-            f'<div class="page-header">'
-            f'<h1>⚽ {APP_NAME}</h1>'
-            f'<p class="subtitle">FIFA World Cup 2026 · AI-powered match predictions</p>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-    with col_badge:
-        st.markdown(
-            '<div style="padding-top:1.4rem;text-align:right;">'
-            '<span style="font-size:0.7rem;color:var(--text-muted);font-family:var(--ff-mono);">'
-            'Updates daily via batch</span>'
-            '</div>',
-            unsafe_allow_html=True,
-        )
-
     df = _load_predictions()
 
     if df.empty:
         _no_data_banner()
         return
 
-    today = str(date.today())
-    upcoming = df[df["date"] >= today].copy().sort_values("date")
-    # Known-team matches only — per §0.5/§3: hide placeholder knockout rows until Monte Carlo (R6)
+    today_str = str(date.today())
+    upcoming = df[df["date"] >= today_str].copy()
+    # Known-team group-stage matches only — per §0.5/§3 (no placeholder knockouts until R6)
     upcoming = upcoming[upcoming["group_label"].str.match(r"^[A-L]$", na=False)].copy()
 
-    # ── Summary metrics row ───────────────────────────────────────────────
-    today_matches = upcoming[upcoming["date"] == today]
-    avg_conf = float(upcoming[["p_home", "p_draw", "p_away"]].max(axis=1).mean()) if not upcoming.empty else 0
-    model_v = str(df["model_version"].iloc[0])[:18] if not df.empty else "—"
+    sort_cols = ["date", "kickoff_time"] if "kickoff_time" in upcoming.columns else ["date"]
+    upcoming = upcoming.sort_values(sort_cols).reset_index(drop=True)
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        st.metric("Today's Matches", len(today_matches))
-    with c2:
-        st.metric("Upcoming Matches", len(upcoming))
-    with c3:
-        st.metric("Avg Confidence", f"{avg_conf:.0%}")
-    with c4:
-        st.metric("Model", model_v.split("_")[0].upper() if "_" in model_v else model_v[:10])
+    if upcoming.empty:
+        _no_data_banner()
+        return
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ── Hero match — First Answer + One Hero rules ────────────────────────────
+    # Next known-team fixture by kickoff: always the first visible element.
+    hero_row = upcoming.iloc[0]
+    hero_idx = 0  # reset_index guarantees this
+    st.markdown(_hero_card_html(hero_row), unsafe_allow_html=True)
 
-    # ── Sidebar-style filters + donut ─────────────────────────────────────
-    col_filters, col_cards = st.columns([1, 3])
+    # ── Chip filters ──────────────────────────────────────────────────────────
+    all_groups = sorted(upcoming["group_label"].dropna().unique().tolist())
 
-    with col_filters:
-        st.markdown('<div class="sec-heading">Filters</div>', unsafe_allow_html=True)
+    st.markdown('<div class="filter-label">Group</div>', unsafe_allow_html=True)
+    sel_group = st.radio(
+        "Group filter",
+        options=["All"] + all_groups,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="pred_group_chip",
+    )
 
-        all_groups = sorted(upcoming["group_label"].dropna().unique().tolist())
-        sel_groups = st.multiselect("Group / Stage", all_groups, default=all_groups,
-                                    label_visibility="collapsed",
-                                    placeholder="All groups")
-        if not sel_groups:
-            sel_groups = all_groups
+    filtered = upcoming if sel_group == "All" else upcoming[upcoming["group_label"] == sel_group]
 
-        date_options = sorted(upcoming["date"].unique().tolist())
-        date_labels = []
-        for d in date_options:
-            try:
-                dt = datetime.strptime(d, "%Y-%m-%d")
-                prefix = "🔴 " if d == today else ""
-                date_labels.append(f"{prefix}{dt.strftime('%a %d %b')}")
-            except Exception:
-                date_labels.append(d)
+    # Date chips are derived from the group-filtered set
+    all_dates = sorted(filtered["date"].unique().tolist())
+    date_label_map: dict[str, str] = {}
+    date_display: list[str] = []
+    for d in all_dates:
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            lbl = "Today" if d == today_str else dt.strftime("%a %d")
+        except Exception:
+            lbl = d
+        date_label_map[lbl] = d
+        date_display.append(lbl)
 
-        date_map = dict(zip(date_labels, date_options))
-        sel_date_labels = st.multiselect("Date", date_labels,
-                                          default=date_labels[:3] if len(date_labels) > 3 else date_labels,
-                                          label_visibility="collapsed",
-                                          placeholder="All dates")
-        sel_dates = [date_map[l] for l in sel_date_labels] if sel_date_labels else date_options
+    st.markdown('<div class="filter-label">Date</div>', unsafe_allow_html=True)
+    sel_date_label = st.radio(
+        "Date filter",
+        options=["All"] + date_display,
+        index=0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="pred_date_chip",
+    )
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<div class="sec-heading">Outlook</div>', unsafe_allow_html=True)
-        if not upcoming.empty:
-            n_home = int(((upcoming["p_home"] > upcoming["p_draw"]) & (upcoming["p_home"] > upcoming["p_away"])).sum())
-            n_draw = int(((upcoming["p_draw"] > upcoming["p_home"]) & (upcoming["p_draw"] > upcoming["p_away"])).sum())
-            n_away = int(((upcoming["p_away"] > upcoming["p_home"]) & (upcoming["p_away"] > upcoming["p_draw"])).sum())
-            st.markdown(f"""
-<div style="padding:0.25rem 0 0.5rem;">
-  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
-    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
-                 color:var(--win);font-variant-numeric:tabular-nums;line-height:1;">{n_home}</span>
-    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Home favored</span>
-  </div>
-  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
-    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
-                 color:var(--draw);font-variant-numeric:tabular-nums;line-height:1;">{n_draw}</span>
-    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Draw likely</span>
-  </div>
-  <div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">
-    <span style="font-family:var(--ff-mono);font-size:1.5rem;font-weight:700;
-                 color:var(--loss);font-variant-numeric:tabular-nums;line-height:1;">{n_away}</span>
-    <span style="font-size:0.82rem;color:var(--text-muted);font-family:var(--ff-body);">Away favored</span>
-  </div>
-</div>""", unsafe_allow_html=True)
+    if sel_date_label == "All":
+        view = filtered
+    else:
+        sel_date = date_label_map.get(sel_date_label)
+        view = filtered[filtered["date"] == sel_date] if sel_date else filtered
 
-    with col_cards:
-        filtered = upcoming[
-            upcoming["group_label"].isin(sel_groups) &
-            upcoming["date"].isin(sel_dates)
-        ]
+    # Grid always excludes the hero row — it's shown above the fold
+    grid = view[view.index != hero_idx]
 
-        if filtered.empty:
+    st.markdown("<div style='margin-top:1.1rem;'></div>", unsafe_allow_html=True)
+
+    # ── Match grid ────────────────────────────────────────────────────────────
+    if grid.empty:
+        if sel_group != "All" or sel_date_label != "All":
             st.markdown(
-                '<p style="color:var(--text-muted);padding:1rem 0;">No matches match the selected filters.</p>',
+                '<p style="color:var(--text-muted);font-size:0.82rem;padding:0.25rem 0;">'
+                "No other matches match the selected filters.</p>",
                 unsafe_allow_html=True,
             )
-        else:
-            # Group by date
-            for match_date, group_df in filtered.groupby("date"):
-                try:
-                    dt = datetime.strptime(str(match_date), "%Y-%m-%d")
-                    is_today = str(match_date) == today
-                    day_lbl = ("🔴 Today — " if is_today else "") + dt.strftime("%A, %d %B %Y")
-                except Exception:
-                    day_lbl = str(match_date)
+    else:
+        for match_date, date_group in grid.groupby("date", sort=True):
+            try:
+                dt = datetime.strptime(str(match_date), "%Y-%m-%d")
+                is_td = str(match_date) == today_str
+                day_lbl = ("Today — " if is_td else "") + dt.strftime("%A, %d %B %Y")
+            except Exception:
+                day_lbl = str(match_date)
 
-                st.markdown(
-                    f'<div class="sec-heading">{day_lbl}</div>',
-                    unsafe_allow_html=True,
-                )
-                cols = st.columns(min(2, len(group_df)))
-                for i, (_, row) in enumerate(group_df.iterrows()):
-                    with cols[i % len(cols)]:
-                        st.markdown(_match_card_html(row), unsafe_allow_html=True)
+            st.markdown(f'<div class="sec-heading">{day_lbl}</div>', unsafe_allow_html=True)
+            cols = st.columns(2)
+            for i, (_, row) in enumerate(date_group.iterrows()):
+                with cols[i % 2]:
+                    st.markdown(_match_card_html(row), unsafe_allow_html=True)
 
-    # ── Data stamp ────────────────────────────────────────────────────────
+    # ── Data stamp ────────────────────────────────────────────────────────────
     if not df.empty:
         try:
             created = pd.to_datetime(df["created_at"].iloc[0]).strftime("%Y-%m-%d %H:%M UTC")
         except Exception:
             created = str(df["created_at"].iloc[0])[:19]
         st.markdown(
-            f'<p class="data-stamp" style="margin-top:1rem;">Data as of {created} · '
-            f'Refresh: <code>python pipelines/refresh.py</code></p>',
+            f'<p class="data-stamp" style="margin-top:1.5rem;">Data as of {created} · '
+            f'Updates daily via batch · <code>python pipelines/refresh.py</code></p>',
             unsafe_allow_html=True,
         )

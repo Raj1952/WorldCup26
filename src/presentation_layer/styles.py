@@ -697,6 +697,104 @@ button[title="Open sidebar"]               {{ display: none !important; }}
   border-radius: var(--radius-sm);
 }}
 
+/* ── Hero match card ─────────────────────────────────────────────────────
+   Larger than a grid card: bigger flags (width=44), team names 1.3rem,
+   taller prob bar, "Next kick-off" badge at top.                         */
+.hero-card {{
+  margin-bottom: 1.75rem;
+}}
+.hero-card .match-card-body {{
+  padding: 1.35rem 1.6rem 1.4rem;
+}}
+.hero-team-name {{
+  font-size: 1.3rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}}
+.hero-badge {{
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(232,184,75,0.08);
+  border: 1px solid rgba(232,184,75,0.25);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-family: var(--ff-mono);
+  font-size: 0.62rem;
+  color: var(--gold);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}}
+.hero-card .prob-bar-track {{
+  height: 36px;
+}}
+
+/* ── Chip filters — radio group restyled as pill chips ────────────────────
+   Targets st.radio with horizontal=True. The radio circle is hidden;
+   the label itself becomes the clickable pill.                            */
+.filter-label {{
+  font-family: var(--ff-mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-top: 0.75rem;
+  margin-bottom: 0.3rem;
+}}
+/* Wrap the options in a flex row */
+div[data-testid="stRadio"] > div[role="radiogroup"] {{
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+  align-items: center !important;
+}}
+/* Each option label becomes a pill chip */
+div[data-testid="stRadio"] > div[role="radiogroup"] > label {{
+  display: inline-flex !important;
+  align-items: center !important;
+  cursor: pointer !important;
+  background: var(--surface-raised) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 20px !important;
+  padding: 3px 12px !important;
+  font-size: 0.73rem !important;
+  font-family: var(--ff-mono) !important;
+  color: var(--text-muted) !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.03em !important;
+  transition:
+    background    var(--anim-fast) var(--ease-fast),
+    border-color  var(--anim-fast) var(--ease-fast),
+    color         var(--anim-fast) var(--ease-fast) !important;
+  white-space: nowrap !important;
+  min-height: 28px !important;
+  user-select: none !important;
+  line-height: 1 !important;
+}}
+div[data-testid="stRadio"] > div[role="radiogroup"] > label:hover {{
+  background: var(--surface) !important;
+  border-color: rgba(232,184,75,0.3) !important;
+  color: var(--text) !important;
+}}
+div[data-testid="stRadio"] > div[role="radiogroup"] > label:has(input:checked) {{
+  background: rgba(232,184,75,0.1) !important;
+  border-color: rgba(232,184,75,0.4) !important;
+  color: var(--gold) !important;
+  font-weight: 700 !important;
+}}
+/* Hide the radio circle dot — the pill is the affordance */
+div[data-testid="stRadio"] > div[role="radiogroup"] > label > div:first-child {{
+  display: none !important;
+}}
+div[data-testid="stRadio"] p {{
+  font-size: 0.73rem !important;
+  font-family: var(--ff-mono) !important;
+  margin: 0 !important;
+  color: inherit !important;
+  line-height: 1 !important;
+}}
+
 /* ── Responsive ─────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {{
   [data-testid="block-container"] {{
