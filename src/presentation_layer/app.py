@@ -3,11 +3,13 @@ Tempo — Streamlit application entrypoint.
 
 Run:  streamlit run src/presentation_layer/app.py
 
+Navigation: fixed top-nav console (replaces Streamlit sidebar).
+Routing:    st.query_params["page"] — URL-safe, bookmarkable, survives refresh.
+
 Layer boundary: NEVER import scikit-learn, xgboost, or any
 Layer 2 training/model module from this file or any component it calls.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -20,6 +22,7 @@ from dotenv import load_dotenv
 from src.presentation_layer.theme import APP_NAME, DARK
 from src.presentation_layer.styles import inject as inject_styles
 from src.presentation_layer.charts.template import register_tempo_template
+from src.presentation_layer.icons import icon
 from src.presentation_layer.pages import today
 from src.presentation_layer.pages import model_report
 from src.presentation_layer.pages import match_detail
@@ -27,50 +30,123 @@ from src.presentation_layer.pages import match_space
 
 load_dotenv()
 
+# ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title=APP_NAME,
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded",
-    menu_items={
-        "About": f"{APP_NAME} — FIFA World Cup 2026 AI Predictor",
-    },
+    initial_sidebar_state="collapsed",   # sidebar hidden — top-nav is the shell
+    menu_items={"About": f"{APP_NAME} — FIFA World Cup 2026 AI Predictor"},
 )
 
-# ── Single CSS injection + Plotly template registration ────────────────────────
-# inject_styles() must be called ONCE before any st.markdown.
-# register_tempo_template() makes template="tempo" available to all chart files.
+# ── Shared CSS + Plotly template (injected ONCE before any st.markdown) ─────
 inject_styles(theme=DARK)
 register_tempo_template()
 
+# ── Route table ─────────────────────────────────────────────────────────────
+# (route_key, lucide_icon_name, display_label, coming_soon)
+_ROUTES = [
+    ("predictions",  "zap",         "Predictions",  False),
+    ("match-space",  "target",      "Match Space",  False),
+    ("match-detail", "search",      "Match Detail", False),
+    ("model-report", "bar-chart-2", "Model Report", False),
+    ("bracket",      "trophy",      "Bracket",      True),   # R6 — Monte Carlo not yet built
+]
+_VALID_PAGES = {r[0] for r in _ROUTES} | {"foundation"}
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _get_page() -> str:
+    """Read current page from URL query param; default to predictions."""
+    raw = st.query_params.get("page", "predictions")
+    return raw if raw in _VALID_PAGES else "predictions"
+
+
+def _nav_html(current_page: str) -> str:
+    """Build the fixed broadcast-console nav bar as an HTML string."""
+    links_html = ""
+    for route, icon_name, label, soon in _ROUTES:
+        active_class = " is-active" if current_page == route else ""
+        aria_current = 'aria-current="page"' if current_page == route else ""
+        soon_badge = '<span class="tempo-nav-soon">soon</span>' if soon else ""
+        nav_icon = icon(icon_name, size=16, color="currentColor")
+        links_html += (
+            f'<li role="none">'
+            f'<a href="?page={route}" class="tempo-nav-link{active_class}" '
+            f'role="menuitem" {aria_current} aria-label="{label}">'
+            f'{nav_icon}'
+            f'<span class="tempo-nav-label">{label}</span>'
+            f'{soon_badge}'
+            f'</a></li>'
+        )
+    return f"""
+<nav class="tempo-nav" role="navigation" aria-label="Tempo main navigation">
+  <div class="tempo-nav-rail"></div>
+  <div class="tempo-nav-inner">
+    <a class="tempo-brand" href="?page=predictions" aria-label="Tempo — home">
+      <span class="tempo-brand-name">{APP_NAME}</span>
+      <span class="tempo-brand-sub">WC26 · AI Predictor</span>
+    </a>
+    <ul class="tempo-nav-links" role="menubar" aria-label="Main pages">
+      {links_html}
+    </ul>
+    <span class="tempo-nav-meta" aria-hidden="true">Updates daily · batch</span>
+  </div>
+</nav>
+"""
+
+
+# ── Page renderers ───────────────────────────────────────────────────────────
+
+def _render_bracket_placeholder() -> None:
+    """Stub for Bracket page — Monte Carlo simulator pending R6."""
+    st.markdown(
+        '<div class="page-header">'
+        '<h1>Bracket &amp; Simulation</h1>'
+        '<p class="subtitle">'
+        'Monte Carlo tournament simulation — advancement odds &amp; road-to-final'
+        '</p>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("""
+<div class="no-data">
+  <h3>Coming soon — R6</h3>
+  <p>
+    Once the group stage resolves, this page will show Monte Carlo advancement
+    and title odds (50,000 runs · seed=42 · conditioned on live standings).
+  </p>
+  <p><code>python pipelines/refresh.py --monte-carlo</code></p>
+  <p style="margin-top:1rem;font-size:0.75rem;color:var(--text-muted);">
+    Knockout fixtures display only after concrete teams are known — per §0.5/§3.
+  </p>
+</div>""", unsafe_allow_html=True)
+
 
 def _render_foundation_demo() -> None:
-    """
-    Throwaway validation page — confirm chrome is stripped, fonts are live,
-    and the 'tempo' Plotly template reads broadcast-grade.
-    Remove this page once Step 3+ UI overhaul pages are done.
-    """
+    """Throwaway validation page — confirm CSS, template, icons are live."""
     import plotly.graph_objects as go
-    from src.presentation_layer.icons import icon, icon_text
+    from src.presentation_layer.icons import icon_text
 
-    st.markdown('<div class="accent-rail"></div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="page-header">'
         '<h1>Foundation pass</h1>'
-        '<p class="subtitle">Visual base validation — chrome strip · fonts · Plotly template · icon system</p>'
+        '<p class="subtitle">'
+        'Visual base validation — chrome strip · fonts · Plotly template · icon system'
+        '</p>'
         '</div>',
         unsafe_allow_html=True,
     )
 
-    # ── Token swatch row ──────────────────────────────────────────────────
     st.markdown('<div class="sec-heading">Design tokens — color</div>', unsafe_allow_html=True)
     swatches = [
-        (DARK.WIN,           "Win #1FB479"),
-        (DARK.DRAW,          "Draw #3E7BFA"),
-        (DARK.LOSS,          "Loss #E4564A"),
-        (DARK.GOLD,          "Gold #E8B84B"),
-        (DARK.TEXT,          "Text #F4F1EA"),
-        (DARK.SURFACE_RAISED,"Raised #1C1C21"),
+        (DARK.WIN,            "Win #1FB479"),
+        (DARK.DRAW,           "Draw #3E7BFA"),
+        (DARK.LOSS,           "Loss #E4564A"),
+        (DARK.GOLD,           "Gold #E8B84B"),
+        (DARK.TEXT,           "Text #F4F1EA"),
+        (DARK.SURFACE_RAISED, "Raised #1C1C21"),
     ]
     cols = st.columns(len(swatches))
     for col, (hex_, label) in zip(cols, swatches):
@@ -84,8 +160,6 @@ def _render_foundation_demo() -> None:
             )
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Typography specimen ───────────────────────────────────────────────
     st.markdown('<div class="sec-heading">Typography</div>', unsafe_allow_html=True)
     st.markdown(
         f'<p style="font-family:\'Archivo\',sans-serif;font-weight:900;font-size:2rem;'
@@ -98,13 +172,13 @@ def _render_foundation_demo() -> None:
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Icons ─────────────────────────────────────────────────────────────
     st.markdown('<div class="sec-heading">Icon system — Lucide SVG §7g</div>', unsafe_allow_html=True)
-    icon_row = " ".join(
-        f'<span title="{name}" style="margin-right:12px;">{icon(name, size=20, color=DARK.TEXT_MUTED)}</span>'
-        for name in ["trending-up", "bar-chart-2", "target", "calendar", "filter",
-                     "award", "globe", "refresh-cw", "check", "alert-triangle"]
+    icon_names = ["trending-up", "bar-chart-2", "target", "calendar", "filter",
+                  "award", "globe", "refresh-cw", "check", "alert-triangle"]
+    icon_row = "".join(
+        f'<span title="{n}" style="margin-right:12px;">'
+        f'{icon(n, size=20, color=DARK.TEXT_MUTED)}</span>'
+        for n in icon_names
     )
     st.markdown(
         f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:8px 0;">'
@@ -118,102 +192,50 @@ def _render_foundation_demo() -> None:
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── Plotly template validation ────────────────────────────────────────
     st.markdown('<div class="sec-heading">Plotly template="tempo" — broadcast check</div>', unsafe_allow_html=True)
-
-    teams = ["England", "Brazil", "France", "Argentina", "Spain"]
-    p_home = [0.52, 0.45, 0.48, 0.55, 0.41]
-    p_draw = [0.27, 0.30, 0.28, 0.24, 0.33]
-    p_away = [0.21, 0.25, 0.24, 0.21, 0.26]
-
+    teams   = ["England", "Brazil", "France", "Argentina", "Spain"]
+    p_home  = [0.52, 0.45, 0.48, 0.55, 0.41]
+    p_draw  = [0.27, 0.30, 0.28, 0.24, 0.33]
+    p_away  = [0.21, 0.25, 0.24, 0.21, 0.26]
     fig = go.Figure(data=[
-        go.Bar(name="Home Win", x=teams, y=p_home,
-               marker_color=DARK.WIN,
+        go.Bar(name="Home Win", x=teams, y=p_home, marker_color=DARK.WIN,
                hovertemplate="<b>%{x}</b><br>Home Win: %{y:.0%}<extra></extra>"),
-        go.Bar(name="Draw",     x=teams, y=p_draw,
-               marker_color=DARK.DRAW,
+        go.Bar(name="Draw",     x=teams, y=p_draw, marker_color=DARK.DRAW,
                hovertemplate="<b>%{x}</b><br>Draw: %{y:.0%}<extra></extra>"),
-        go.Bar(name="Away Win", x=teams, y=p_away,
-               marker_color=DARK.LOSS,
+        go.Bar(name="Away Win", x=teams, y=p_away, marker_color=DARK.LOSS,
                hovertemplate="<b>%{x}</b><br>Away Win: %{y:.0%}<extra></extra>"),
     ])
     fig.update_layout(
         template="tempo",
         barmode="stack",
-        title_text="Next-match outcome distribution — synthetic validation data",
+        title_text="Outcome distribution — synthetic validation data",
         yaxis=dict(tickformat=".0%", title="Probability"),
         xaxis=dict(title="Home team"),
-        height=320,
-        showlegend=True,
+        height=300,
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ── Z-index tokens ────────────────────────────────────────────────────
-    st.markdown('<div class="sec-heading">Z-index scale — §5d</div>', unsafe_allow_html=True)
-    z_tokens = [
-        ("--z-base",            "0",    "Default flow"),
-        ("--z-sticky",          "100",  "Sticky headers"),
-        ("--z-dropdown",        "200",  "Dropdowns / selects"),
-        ("--z-modal-backdrop",  "300",  "Modal scrim"),
-        ("--z-modal",           "400",  "Modal content"),
-        ("--z-toast",           "500",  "Toast notifications"),
-        ("--z-tooltip",         "600",  "Tooltips"),
-    ]
-    rows = "".join(
-        f'<div class="outcome-row">'
-        f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.78rem;color:{DARK.GOLD};">{var}</span>'
-        f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:0.78rem;color:{DARK.TEXT_MUTED};">{val}</span>'
-        f'<span style="font-size:0.75rem;color:{DARK.TEXT_MUTED};">{desc}</span>'
-        f'</div>'
-        for var, val, desc in z_tokens
-    )
-    st.markdown(f'<div class="outcome-table">{rows}</div>', unsafe_allow_html=True)
-
     st.markdown(
-        f'<p class="data-stamp" style="margin-top:1.5rem;">'
-        f'Foundation pass · styles.py consolidated · template="tempo" registered · icon system live</p>',
+        '<p class="data-stamp" style="margin-top:1.5rem;">'
+        'Foundation pass · CSS consolidated · template="tempo" · icon system live</p>',
         unsafe_allow_html=True,
     )
 
 
-# ── Sidebar navigation ──────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown(f"""
-<div class="sidebar-brand">
-  <div class="sidebar-brand-name">{APP_NAME}</div>
-  <div class="sidebar-brand-sub">WC 2026 · AI Predictor</div>
-  <div style="height:3px;background:linear-gradient(90deg,
-    var(--win) 0% 33.3%,var(--draw) 33.3% 66.6%,var(--loss) 66.6% 100%);
-    border-radius:2px;margin-top:0.9rem;"></div>
-</div>""", unsafe_allow_html=True)
+# ── Render nav + route ───────────────────────────────────────────────────────
 
-    page = st.radio(
-        "Navigation",
-        options=["Predictions", "Match Space", "Match Detail", "Model Report", "Foundation"],
-        label_visibility="collapsed",
-    )
+page = _get_page()
+st.markdown(_nav_html(page), unsafe_allow_html=True)
 
-    st.markdown("""
-<div class="sidebar-legend">
-  <div style="margin-bottom:0.3rem;display:flex;gap:10px;flex-wrap:wrap;">
-    <span><span style="color:var(--win);">■</span> Home Win</span>
-    <span><span style="color:var(--draw);">■</span> Draw</span>
-    <span><span style="color:var(--loss);">■</span> Away Win</span>
-  </div>
-  <div>Model: XGBoost + Isotonic calibration</div>
-  <div>Data: martj42 · openfootball</div>
-  <div>49,475 historical matches</div>
-</div>""", unsafe_allow_html=True)
-
-# ── Page routing ────────────────────────────────────────────────────────────
-if page == "Predictions":
+if page == "predictions":
     today.render(theme=DARK)
-elif page == "Match Space":
+elif page == "match-space":
     match_space.render(theme=DARK)
-elif page == "Match Detail":
+elif page == "match-detail":
     match_detail.render(theme=DARK)
-elif page == "Model Report":
+elif page == "model-report":
     model_report.render(theme=DARK)
-elif page == "Foundation":
+elif page == "bracket":
+    _render_bracket_placeholder()
+elif page == "foundation":
     _render_foundation_demo()

@@ -227,7 +227,6 @@ def _outcome_distribution(df: pd.DataFrame) -> go.Figure:
 
 
 def render(theme=DARK) -> None:
-    st.markdown('<div class="accent-rail"></div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="page-header">'
         "<h1>Model Report</h1>"

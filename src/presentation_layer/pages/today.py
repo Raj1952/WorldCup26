@@ -146,8 +146,6 @@ def _no_data_banner() -> None:
 
 def render(theme=DARK) -> None:
     # ── Page header ──────────────────────────────────────────────────────
-    st.markdown('<div class="accent-rail"></div>', unsafe_allow_html=True)
-
     col_title, col_badge = st.columns([3, 1])
     with col_title:
         st.markdown(

@@ -77,6 +77,9 @@ def _build_css(theme: _DarkPalette | _LightPalette) -> str:
   --z-modal:         400;
   --z-toast:         500;
   --z-tooltip:       600;
+
+  /* App shell — top nav: 3px tri-rail + 56px inner */
+  --nav-height: 59px;
 }}
 
 /* ── Streamlit chrome strip ─────────────────────────────────────────────── */
@@ -93,7 +96,7 @@ footer[data-testid="stFooter"],
 [data-testid="stMainBlockContainer"],
 [data-testid="stAppViewBlockContainer"],
 [data-testid="block-container"],
-.block-container                             {{ padding-top: 1.5rem !important; }}
+.block-container                             {{ padding-top: calc(var(--nav-height) + 1rem) !important; }}
 
 [data-testid="stMainBlockContainer"],
 [data-testid="block-container"],
@@ -149,34 +152,171 @@ h1, h2, h3 {{
   max-width: 72ch;       /* cap body line length per §3c */
 }}
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
-[data-testid="stSidebar"] {{
-  background-color: var(--surface) !important;
-  border-right: 1px solid var(--border) !important;
-}}
-[data-testid="stSidebar"] * {{ color: var(--text) !important; }}
-[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ padding: 0 !important; }}
+/* ── Sidebar: hidden — top-nav console replaces it ──────────────────────── */
+[data-testid="stSidebar"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="stSidebarNav"],
+button[aria-label="Open sidebar"],
+button[title="Open sidebar"]               {{ display: none !important; }}
 
-[data-testid="stSidebar"] [data-baseweb="radio"] {{ gap: 4px !important; }}
-[data-testid="stSidebar"] [data-baseweb="radio"] label {{
-  display: flex !important; align-items: center !important; gap: 10px !important;
-  padding: 0.55rem 0.9rem !important; border-radius: var(--radius-sm) !important;
-  cursor: pointer !important;
-  transition: background var(--anim-fast) var(--ease-fast),
-              color    var(--anim-fast) var(--ease-fast) !important;
-  font-family: var(--ff-body) !important; font-weight: 500 !important;
-  font-size: 0.88rem !important; color: var(--text-muted) !important;
-  border: 1px solid transparent !important;
+/* ── Top navigation — fixed broadcast console ────────────────────────────
+   Position: fixed at viewport top so it survives page scroll.
+   z-index: --z-sticky (100) — above content, below Streamlit dropdowns (200).
+   ──────────────────────────────────────────────────────────────────────── */
+.tempo-nav {{
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: var(--z-sticky);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }}
-[data-testid="stSidebar"] [data-baseweb="radio"] label:hover {{
-  background: var(--surface-raised) !important; color: var(--text) !important;
+/* Tri-color accent rail — 3px at very top of nav */
+.tempo-nav-rail {{
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--win) 0% 33.3%, var(--draw) 33.3% 66.6%, var(--loss) 66.6% 100%);
 }}
-[data-testid="stSidebar"] [data-baseweb="radio"] [aria-checked="true"] ~ label,
-[data-testid="stSidebar"] [data-baseweb="radio"] label:has([aria-checked="true"]) {{
-  background: rgba(232,184,75,0.08) !important;
-  color: var(--gold) !important; border-color: rgba(232,184,75,0.2) !important;
+/* Inner row: brand | links | meta */
+.tempo-nav-inner {{
+  display: flex;
+  align-items: center;
+  padding: 0 2rem;
+  height: 56px;
+  max-width: 1400px;
+  margin: 0 auto;
+  gap: 0;
 }}
-[data-testid="stSidebar"] [data-baseweb="radio"] [type="radio"] {{ display: none !important; }}
+/* Brand */
+.tempo-brand {{
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-decoration: none;
+  margin-right: 2rem;
+  flex-shrink: 0;
+  min-height: 44px;
+  line-height: 1;
+}}
+.tempo-brand-name {{
+  font-family: var(--ff-display);
+  font-weight: 900;
+  font-size: 1.05rem;
+  color: var(--gold);
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}}
+.tempo-brand-sub {{
+  font-family: var(--ff-mono);
+  font-size: 0.52rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1.6;
+}}
+/* Nav link list */
+.tempo-nav-links {{
+  display: flex;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  align-items: center;
+}}
+.tempo-nav-links::-webkit-scrollbar {{ display: none; }}
+/* Individual nav link */
+.tempo-nav-link {{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  min-height: 44px;     /* §9: 44px touch target */
+  min-width: 44px;
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-family: var(--ff-body);
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  border: 1px solid transparent;
+  transition:
+    background     var(--anim-fast) var(--ease-fast),
+    color          var(--anim-fast) var(--ease-fast),
+    border-color   var(--anim-fast) var(--ease-fast);
+}}
+.tempo-nav-link:hover {{
+  background: var(--surface-raised);
+  color: var(--text);
+}}
+/* Active route — Signal Gold + raised background */
+.tempo-nav-link.is-active {{
+  background: rgba(232,184,75,0.08);
+  color: var(--gold);
+  border-color: rgba(232,184,75,0.2);
+}}
+.tempo-nav-link.is-active svg {{ color: var(--gold); }}
+/* Keyboard focus — §9 */
+.tempo-nav-link:focus-visible {{
+  outline: 2px solid var(--gold) !important;
+  outline-offset: 2px !important;
+}}
+.tempo-brand:focus-visible {{
+  outline: 2px solid var(--gold) !important;
+  outline-offset: 2px !important;
+  border-radius: var(--radius-sm);
+}}
+/* SVG icon inside link */
+.tempo-nav-link svg {{ flex-shrink: 0; transition: color var(--anim-fast) var(--ease-fast); }}
+/* "Soon" badge on not-yet-built routes */
+.tempo-nav-soon {{
+  font-size: 0.5rem;
+  font-family: var(--ff-mono);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  line-height: 1.4;
+}}
+/* Right-side meta ("Updates daily · batch") */
+.tempo-nav-meta {{
+  flex-shrink: 0;
+  margin-left: 1.25rem;
+  font-family: var(--ff-mono);
+  font-size: 0.6rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}}
+
+/* ── Nav: mobile ≤768px ────────────────────────────────────────────────── */
+@media (max-width: 768px) {{
+  .tempo-nav-inner {{
+    padding: 0 0.75rem;
+    height: 56px; /* keep single-row height for consistent --nav-height */
+  }}
+  .tempo-brand {{ margin-right: 1rem; }}
+  .tempo-brand-sub {{ display: none; }}
+  .tempo-nav-meta {{ display: none; }}
+}}
+/* ── Nav: compact icon-only at 480px ────────────────────────────────────── */
+@media (max-width: 480px) {{
+  .tempo-nav-label {{ display: none; }}
+  .tempo-nav-link {{
+    padding: 0 10px;
+    min-width: 44px;
+    justify-content: center;
+    gap: 0;
+  }}
+}}
 
 /* ── st.metric ──────────────────────────────────────────────────────────── */
 [data-testid="metric-container"] {{

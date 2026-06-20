@@ -42,7 +42,6 @@ def _match_label(row: pd.Series) -> str:
 
 
 def render(theme=DARK) -> None:
-    st.markdown('<div class="accent-rail"></div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="page-header">'
         "<h1>Match Space</h1>"

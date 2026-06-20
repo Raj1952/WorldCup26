@@ -78,7 +78,6 @@ def _factors_bar(factors: list[dict], home: str) -> go.Figure:
 
 
 def render(theme=DARK) -> None:
-    st.markdown('<div class="accent-rail"></div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="page-header">'
         "<h1>Match Detail</h1>"
