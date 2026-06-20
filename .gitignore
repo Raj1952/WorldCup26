@@ -29,6 +29,19 @@ build/
 # Pipeline output parquets are committed — the app and CI read them.
 # Do NOT add predictions.parquet or artifacts/reports/*.parquet here.
 
+# Claude Code / agent tooling — local only
+.agents/
+.claude/
+skills-lock.json
+
+# Streamlit runtime logs
+.streamlit_err.txt
+.streamlit_log.txt
+
+# Temporary nav screenshots
+desktop_nav.png
+mobile_nav.png
+
 # IDE / OS noise
 .vscode/
 .idea/
