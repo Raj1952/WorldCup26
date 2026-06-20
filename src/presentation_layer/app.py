@@ -141,9 +141,9 @@ def _render_foundation_demo() -> None:
 
     st.markdown('<div class="sec-heading">Design tokens — color</div>', unsafe_allow_html=True)
     swatches = [
-        (DARK.WIN,            "Win #1FB479"),
-        (DARK.DRAW,           "Draw #3E7BFA"),
-        (DARK.LOSS,           "Loss #E4564A"),
+        (DARK.WIN,            "Win #4CA882"),
+        (DARK.DRAW,           "Draw #6B8ABF"),
+        (DARK.LOSS,           "Loss #C9645C"),
         (DARK.GOLD,           "Gold #E8B84B"),
         (DARK.TEXT,           "Text #F4F1EA"),
         (DARK.SURFACE_RAISED, "Raised #1C1C21"),

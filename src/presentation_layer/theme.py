@@ -12,7 +12,7 @@ APP_NAME = "Tempo"
 
 @dataclass(frozen=True)
 class _DarkPalette:
-    BG: str = "#0B0B0D"
+    BG: str = "#111114"
     SURFACE: str = "#141417"
     SURFACE_RAISED: str = "#1C1C21"
     BORDER: str = "#2A2A31"
@@ -20,12 +20,12 @@ class _DarkPalette:
     TEXT_MUTED: str = "#A7A39B"
     GOLD: str = "#E8B84B"
     GOLD_BRIGHT: str = "#FFD66B"
-    WIN: str = "#1FB479"
-    DRAW: str = "#3E7BFA"
-    LOSS: str = "#E4564A"
-    WIN_TEXT: str = "#A8F0CF"
-    DRAW_TEXT: str = "#B8CFFE"
-    LOSS_TEXT: str = "#FAC0BC"
+    WIN: str = "#4CA882"
+    DRAW: str = "#6B8ABF"
+    LOSS: str = "#C9645C"
+    WIN_TEXT: str = "#052318"
+    DRAW_TEXT: str = "#081526"
+    LOSS_TEXT: str = "#250907"
 
 
 @dataclass(frozen=True)

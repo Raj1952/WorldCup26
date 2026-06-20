@@ -37,9 +37,9 @@ _BORDER      = "#2A2A31"
 _TEXT        = "#F4F1EA"
 _MUTED       = "#A7A39B"
 _GOLD        = "#E8B84B"
-_WIN_COLOR   = "#1FB479"   # positive / home-favoring
-_LOSS_COLOR  = "#E4564A"   # negative / away-favoring
-_BASE_COLOR  = "#3E7BFA"   # draw blue — used for the base-rate bar
+_WIN_COLOR   = "#4CA882"   # positive / home-favoring
+_LOSS_COLOR  = "#C9645C"   # negative / away-favoring
+_BASE_COLOR  = "#6B8ABF"   # draw steel — used for the base-rate bar
 _TOTAL_COLOR = _GOLD       # calibrated output bar
 
 

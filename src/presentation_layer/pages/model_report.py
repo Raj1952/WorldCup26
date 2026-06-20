@@ -93,9 +93,9 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
     )
 
     outcome_meta = [
-        ("home", "Home Win", "#1FB479"),
-        ("draw", "Draw",     "#3E7BFA"),
-        ("away", "Away Win", "#E4564A"),
+        ("home", "Home Win", "#4CA882"),
+        ("draw", "Draw",     "#6B8ABF"),
+        ("away", "Away Win", "#C9645C"),
     ]
 
     for outcome, label, color in outcome_meta:
@@ -112,7 +112,7 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
                 size=sub["bin_count"].clip(upper=200) / 15 + 5,
                 color=color,
                 opacity=0.85,
-                line=dict(color="#0B0B0D", width=1),
+                line=dict(color="#111114", width=1),
             ),
             customdata=sub[["bin_count"]].values,
             hovertemplate=(
@@ -138,8 +138,8 @@ def _reliability_diagram(cal_df: pd.DataFrame, conf_df: pd.DataFrame) -> go.Figu
             x=conf_df["confidence"],
             nbinsx=20,
             name="Confidence",
-            marker_color="#3E7BFA",
-            marker_line=dict(color="#0B0B0D", width=0.5),
+            marker_color="#6B8ABF",
+            marker_line=dict(color="#111114", width=0.5),
             opacity=0.75,
             hovertemplate="Confidence: %{x:.0%}<br>Matches: %{y}<extra></extra>",
         ), row=2, col=1)
@@ -182,16 +182,16 @@ def _metrics_timeline(df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(
         x=df["created_at"], y=df["log_loss_test"],
         name="Log-Loss (lower = better)",
-        line=dict(color="#3E7BFA", width=2),
+        line=dict(color="#6B8ABF", width=2),
         mode="lines+markers",
-        marker=dict(size=6, color="#3E7BFA"),
+        marker=dict(size=6, color="#6B8ABF"),
     ))
     fig.add_trace(go.Scatter(
         x=df["created_at"], y=df["accuracy_test"],
         name="Accuracy",
-        line=dict(color="#1FB479", width=2),
+        line=dict(color="#4CA882", width=2),
         mode="lines+markers",
-        marker=dict(size=6, color="#1FB479"),
+        marker=dict(size=6, color="#4CA882"),
         yaxis="y2",
     ))
     fig.update_layout(
@@ -212,7 +212,7 @@ def _outcome_distribution(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure(go.Bar(
         x=["Home Win", "Draw", "Away Win"],
         y=counts.values,
-        marker_color=["#1FB479", "#3E7BFA", "#E4564A"],
+        marker_color=["#4CA882", "#6B8ABF", "#C9645C"],
         text=counts.values,
         textposition="outside",
         textfont=dict(color="#F4F1EA", family="'JetBrains Mono', monospace"),

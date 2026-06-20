@@ -44,7 +44,7 @@ def _factors_bar(factors: list[dict], home: str) -> go.Figure:
         return go.Figure()
     labels = [f["label"] for f in factors]
     impacts = [f["impact"] * (1 if f["direction"] == "+" else -1) for f in factors]
-    colors = ["#1FB479" if v >= 0 else "#E4564A" for v in impacts]
+    colors = ["#4CA882" if v >= 0 else "#C9645C" for v in impacts]
 
     fig = go.Figure(go.Bar(
         x=impacts,

@@ -6,7 +6,7 @@ page below can filter the match list to that selection.
 
 Design (§0.5 §2):
   - Three corners: Home Win (a), Draw (b), Away Win (c)
-  - Color: favored outcome triad (win=#1FB479, draw=#3E7BFA, loss=#E4564A)
+  - Color: favored outcome triad (win=#4CA882, draw=#6B8ABF, loss=#C9645C)
   - Size: scaled by model confidence (max(p_home, p_draw, p_away))
   - Hover: shows teams, group, probabilities
   - Click: on_select='rerun' → selection stored in session_state['ternary_selected']
@@ -23,9 +23,9 @@ _BORDER = "#2A2A31"
 _TEXT   = "#F4F1EA"
 _MUTED  = "#A7A39B"
 _GOLD   = "#E8B84B"
-_WIN    = "#1FB479"
-_DRAW   = "#3E7BFA"
-_LOSS   = "#E4564A"
+_WIN    = "#4CA882"
+_DRAW   = "#6B8ABF"
+_LOSS   = "#C9645C"
 
 
 def _outcome_color(row: pd.Series) -> str:
@@ -98,7 +98,7 @@ def ternary_scatter(
     labels     = [_label(r)  for _, r in df.iterrows()]
     hovertexts = [_hover(r)  for _, r in df.iterrows()]
 
-    marker_line_colors = ["#0B0B0D"] * len(df)
+    marker_line_colors = ["#111114"] * len(df)
     marker_line_widths = [1.0] * len(df)
     if selected_idx is not None and 0 <= selected_idx < len(df):
         marker_line_colors[selected_idx] = _GOLD
@@ -178,9 +178,9 @@ def ternary_scatter(
                 "Match Space — upcoming group-stage matches<br>"
                 "<sup style='font-size:10px;color:#A7A39B'>"
                 "Click a point to filter · "
-                "<span style='color:#1FB479'>●</span> Home favoured  "
-                "<span style='color:#3E7BFA'>●</span> Draw likely  "
-                "<span style='color:#E4564A'>●</span> Away favoured"
+                "<span style='color:#4CA882'>●</span> Home favoured  "
+                "<span style='color:#6B8ABF'>●</span> Draw likely  "
+                "<span style='color:#C9645C'>●</span> Away favoured"
                 "</sup>"
             ),
             font = dict(family="'Archivo',sans-serif", size=14, color=_TEXT),

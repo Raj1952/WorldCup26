@@ -14,7 +14,7 @@ from typing import NamedTuple
 import numpy as np
 
 OUTCOME_LABELS = ["Home Win", "Draw", "Away Win"]
-OUTCOME_COLORS = ["#1FB479", "#3E7BFA", "#E4564A"]
+OUTCOME_COLORS = ["#4CA882", "#6B8ABF", "#C9645C"]
 
 
 def compute_rps(y_true: np.ndarray, proba: np.ndarray) -> float:

@@ -444,7 +444,7 @@ button[title="Open sidebar"]               {{ display: none !important; }}
 }}
 [data-testid="baseButton-primary"], button[kind="primary"] {{
   background: var(--gold) !important; border: none !important;
-  color: #0B0B0D !important; border-radius: var(--radius-sm) !important;
+  color: #111114 !important; border-radius: var(--radius-sm) !important;
   font-family: var(--ff-display) !important; font-weight: 700 !important;
   font-size: 0.88rem !important;
 }}
@@ -573,9 +573,9 @@ button[title="Open sidebar"]               {{ display: none !important; }}
   font-family: var(--ff-mono); font-size: 0.72rem; font-weight: 700;
   white-space: nowrap; overflow: hidden; min-width: 0; letter-spacing: -0.01em;
 }}
-.seg-home {{ background: var(--win);  color: #0a3d27; border-radius: 6px 0 0 6px; }}
-.seg-draw {{ background: var(--draw); color: #0d1e52; }}
-.seg-away {{ background: var(--loss); color: #4a0f0a; border-radius: 0 6px 6px 0; }}
+.seg-home {{ background: var(--win);  color: var(--win-text);  border-radius: 6px 0 0 6px; }}
+.seg-draw {{ background: var(--draw); color: var(--draw-text); }}
+.seg-away {{ background: var(--loss); color: var(--loss-text); border-radius: 0 6px 6px 0; }}
 .prob-bar-labels {{
   display: flex; justify-content: space-between; margin-bottom: 0.5rem; padding: 0 1px;
 }}
@@ -602,8 +602,8 @@ button[title="Open sidebar"]               {{ display: none !important; }}
   font-size: 0.67rem; font-family: var(--ff-body); font-weight: 500;
   border-radius: 5px; padding: 3px 8px; letter-spacing: 0.01em; line-height: 1.3;
 }}
-.fpos {{ background: rgba(31,180,121,0.1);  color: #6ee9b7; border: 1px solid rgba(31,180,121,0.22); }}
-.fneg {{ background: rgba(228,86,74,0.1);   color: #f9a9a4; border: 1px solid rgba(228,86,74,0.22); }}
+.fpos {{ background: rgba(76,168,130,0.1);  color: #a8d5c2; border: 1px solid rgba(76,168,130,0.22); }}
+.fneg {{ background: rgba(201,100,92,0.1);  color: #ecb2ae; border: 1px solid rgba(201,100,92,0.22); }}
 
 /* Data stamp — §7e */
 .data-stamp {{
@@ -648,8 +648,8 @@ button[title="Open sidebar"]               {{ display: none !important; }}
 .metric-card .mc-sub {{ font-size: 0.67rem; color: var(--text-muted); margin-top: 3px; }}
 
 .beat-baseline {{
-  background: rgba(31,180,121,0.1); border: 1px solid rgba(31,180,121,0.28);
-  color: #6ee9b7; border-radius: 6px; padding: 2px 8px;
+  background: rgba(76,168,130,0.1); border: 1px solid rgba(76,168,130,0.28);
+  color: #a8d5c2; border-radius: 6px; padding: 2px 8px;
   font-size: 0.7rem; font-family: var(--ff-mono); display: inline-block; margin-left: 6px;
 }}
 

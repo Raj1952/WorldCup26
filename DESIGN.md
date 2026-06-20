@@ -42,7 +42,7 @@ All tokens live in `src/presentation_layer/theme.py` as Python constants and are
 
 | Token | Value | Semantic role |
 |---|---|---|
-| `--bg` | `#0B0B0D` | Page background (warm near-black) |
+| `--bg` | `#111114` | Page background (warm near-black) |
 | `--surface` | `#141417` | Card background |
 | `--surface-raised` | `#1C1C21` | Elevated / hover / dropdown |
 | `--border` | `#2A2A31` | Hairlines, dividers |
@@ -50,9 +50,9 @@ All tokens live in `src/presentation_layer/theme.py` as Python constants and are
 | `--text-muted` | `#A7A39B` | Secondary text (~6:1 on `--bg` ✓) |
 | `--gold` | `#E8B84B` | Signature accent: large numbers, favored pick, active nav, focus ring |
 | `--gold-bright` | `#FFD66B` | Gold hover / active |
-| `--win` | `#1FB479` | Home / favored outcome (Mexico green / Wave 1) |
-| `--draw` | `#3E7BFA` | Draw outcome (USA blue / Wave 2) |
-| `--loss` | `#E4564A` | Away / underdog outcome (Canada red / Wave 3) |
+| `--win` | `#4CA882` | Home / favored outcome (Mexico green / Wave 1, muted sage) |
+| `--draw` | `#6B8ABF` | Draw outcome (USA blue / Wave 2, steel blue) |
+| `--loss` | `#C9645C` | Away / underdog outcome (Canada red / Wave 3, muted clay) |
 
 ### 2b. Win / Draw / Loss = Host-Nation Triad
 
@@ -72,9 +72,9 @@ Gold is **not** for body copy, section headings, or decoration.
 ### 2d. Segment text on probability fills
 
 Text inside `--win`/`--draw`/`--loss` fills uses dark tints — never `--text` or white:
-- On `--win` fill: `#0a3d27`
-- On `--draw` fill: `#0d1e52`
-- On `--loss` fill: `#4a0f0a`
+- On `--win` fill (#4CA882): `#052318` (5.74:1 ✓)
+- On `--draw` fill (#6B8ABF): `#081526` (5.25:1 ✓)
+- On `--loss` fill (#C9645C): `#250907` (4.87:1 ✓)
 
 These pass ≥4.5:1 contrast on the respective fill colors.
 
@@ -402,9 +402,9 @@ No active visualization violations remain.
 
 | Element | Foreground | Background | Pass? |
 |---|---|---|---|
-| Body text | `--text` #F4F1EA | `--bg` #0B0B0D | ✓ ~15:1 |
-| Muted text | `--text-muted` #A7A39B | `--bg` #0B0B0D | ✓ ~6:1 |
-| Gold on bg (large) | `--gold` #E8B84B | `--bg` #0B0B0D | ✓ large text only |
+| Body text | `--text` #F4F1EA | `--bg` #111114 | ✓ ~15:1 |
+| Muted text | `--text-muted` #A7A39B | `--bg` #111114 | ✓ ~6:1 |
+| Gold on bg (large) | `--gold` #E8B84B | `--bg` #111114 | ✓ large text only |
 | Prob bar text | dark tints (§2d) | `--win/draw/loss` | must verify per fill |
 | Muted text on surface | `--text-muted` #A7A39B | `--surface` #141417 | ✓ ~5:1 |
 | Muted text on surface-raised | `--text-muted` #A7A39B | `--surface-raised` #1C1C21 | ✓ ~4.8:1 |
