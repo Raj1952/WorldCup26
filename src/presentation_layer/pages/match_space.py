@@ -24,16 +24,27 @@ from src.presentation_layer.flags import flag_img
 _PREDICTIONS_PATH = Path("predictions.parquet")
 _SK = "ms_selected"   # session_state key
 
+_REQUIRED_COLS = frozenset({
+    "match_id", "date", "home_team", "away_team",
+    "p_home", "p_draw", "p_away", "is_projected",
+    "model_version", "created_at",
+})
+
 
 @st.cache_data(ttl=120)
 def _load() -> pd.DataFrame:
     if not _PREDICTIONS_PATH.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(_PREDICTIONS_PATH)
-    df["top_factors"] = df["top_factors"].apply(
-        lambda x: json.loads(x) if isinstance(x, str) else (x if isinstance(x, list) else [])
-    )
-    return df
+    try:
+        df = pd.read_parquet(_PREDICTIONS_PATH)
+        if not _REQUIRED_COLS.issubset(df.columns):
+            return pd.DataFrame()
+        df["top_factors"] = df["top_factors"].apply(
+            lambda x: json.loads(x) if isinstance(x, str) else (x if isinstance(x, list) else [])
+        )
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 # ── HTML helpers ──────────────────────────────────────────────────────────────
@@ -160,11 +171,19 @@ def render(theme=DARK) -> None:
 
     df = _load()
     if df.empty:
-        st.markdown(
-            '<div class="no-data"><h3>No predictions</h3>'
-            "<p>Run <code>python pipelines/refresh.py</code> first.</p></div>",
-            unsafe_allow_html=True,
-        )
+        if _PREDICTIONS_PATH.exists():
+            st.markdown(
+                '<div class="no-data"><h3>Predictions file is missing or corrupted</h3>'
+                "<p>Last refresh may have failed — re-run "
+                "<code>python pipelines/refresh.py</code>.</p></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="no-data"><h3>No predictions</h3>'
+                "<p>Run <code>python pipelines/refresh.py</code> first.</p></div>",
+                unsafe_allow_html=True,
+            )
         return
 
     today    = str(date.today())
@@ -237,3 +256,15 @@ def render(theme=DARK) -> None:
             "Click a point above or use the selector — prediction detail reveals here.</p>",
             unsafe_allow_html=True,
         )
+
+    # ── Data stamp — §7e ──────────────────────────────────────────────────────
+    try:
+        pred_ts = pd.read_parquet(_PREDICTIONS_PATH, columns=["created_at"])["created_at"].max()
+        ts_str  = pd.to_datetime(pred_ts).strftime("%Y-%m-%d %H:%M UTC")
+    except Exception:
+        ts_str = "unknown"
+    st.markdown(
+        f'<p class="data-stamp" style="margin-top:1.5rem;">'
+        f"Data as of <code>{ts_str}</code> · Updates daily via batch</p>",
+        unsafe_allow_html=True,
+    )

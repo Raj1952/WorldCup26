@@ -807,6 +807,33 @@ div[data-testid="stRadio"] p {{
   .match-teams {{ flex-direction: column; gap: 0.35rem; }}
   .team-block.away {{ flex-direction: row; text-align: left; }}
 }}
+/* ── 375px — single-column, no overflow ────────────────────────────────── */
+@media (max-width: 375px) {{
+  .team-name {{
+    font-size: 0.8rem !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }}
+  .match-chip {{
+    font-size: 0.58rem !important;
+    white-space: normal !important;
+  }}
+  .match-card-body {{ padding: 0.75rem 0.875rem; }}
+  .hero-team-name {{ font-size: 1rem !important; }}
+  /* Share card preview — scroll rather than break layout */
+  .sc-card-scroll-wrap {{ overflow-x: auto; max-width: 100%; }}
+}}
+/* ── 320px — tightest supported viewport ───────────────────────────────── */
+@media (max-width: 320px) {{
+  [data-testid="stMainBlockContainer"] {{
+    padding-left:  0.5rem !important;
+    padding-right: 0.5rem !important;
+  }}
+  .team-name {{ font-size: 0.75rem !important; }}
+  .page-header h1 {{ font-size: 1.25rem !important; }}
+  .prob-bar-track {{ height: 24px !important; }}
+  .prob-seg {{ font-size: 0.62rem !important; }}
+}}
 
 /* ── Reduced motion — §9 ────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {{

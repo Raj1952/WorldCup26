@@ -15,16 +15,27 @@ from src.presentation_layer.flags import flag_img
 
 _PREDICTIONS_PATH = Path("predictions.parquet")
 
+_REQUIRED_COLS = frozenset({
+    "match_id", "date", "home_team", "away_team",
+    "p_home", "p_draw", "p_away", "is_projected",
+    "model_version", "created_at",
+})
+
 
 @st.cache_data(ttl=60)
 def _load_predictions() -> pd.DataFrame:
     if not _PREDICTIONS_PATH.exists():
         return pd.DataFrame()
-    df = pd.read_parquet(_PREDICTIONS_PATH)
-    df["top_factors"] = df["top_factors"].apply(
-        lambda x: json.loads(x) if isinstance(x, str) else (x if isinstance(x, list) else [])
-    )
-    return df
+    try:
+        df = pd.read_parquet(_PREDICTIONS_PATH)
+        if not _REQUIRED_COLS.issubset(df.columns):
+            return pd.DataFrame()
+        df["top_factors"] = df["top_factors"].apply(
+            lambda x: json.loads(x) if isinstance(x, str) else (x if isinstance(x, list) else [])
+        )
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def _prob_bar_html(p_home: float, p_draw: float, p_away: float,
@@ -59,7 +70,7 @@ def _favored_html(p_home: float, p_draw: float, p_away: float,
     elif best == p_away:
         label, flag, conf = away, af, p_away
     else:
-        label, flag, conf = "Draw likely", "🤝", p_draw
+        label, flag, conf = "Draw likely", "", p_draw
     return (
         f'<div class="favored-chip">'
         f'<span class="favored-dot"></span>'
@@ -120,7 +131,7 @@ def _hero_card_html(row: pd.Series) -> str:
   <div class="match-card-body">
     <div style="display:flex;align-items:center;justify-content:space-between;
                 flex-wrap:wrap;gap:0.5rem;margin-bottom:0.85rem;">
-      <span class="hero-badge">&#9889; {kick_badge}</span>
+      <span class="hero-badge"><svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:middle;margin-right:3px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>{kick_badge}</span>
       <span class="match-chip" style="margin-bottom:0;">{chip_text}</span>
     </div>
     <div class="match-teams" style="margin-bottom:1.1rem;">
@@ -208,7 +219,15 @@ def render(theme=DARK) -> None:
     df = _load_predictions()
 
     if df.empty:
-        _no_data_banner()
+        if _PREDICTIONS_PATH.exists():
+            st.markdown(
+                '<div class="no-data"><h3>Predictions file is missing or corrupted</h3>'
+                "<p>Last refresh may have failed — re-run "
+                "<code>python pipelines/refresh.py</code>.</p></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            _no_data_banner()
         return
 
     today_str = str(date.today())
@@ -308,7 +327,7 @@ def render(theme=DARK) -> None:
         except Exception:
             created = str(df["created_at"].iloc[0])[:19]
         st.markdown(
-            f'<p class="data-stamp" style="margin-top:1.5rem;">Data as of {created} · '
-            f'Updates daily via batch · <code>python pipelines/refresh.py</code></p>',
+            f'<p class="data-stamp" style="margin-top:1.5rem;">Data as of <code>{created}</code> · '
+            f'Updates daily via batch</p>',
             unsafe_allow_html=True,
         )

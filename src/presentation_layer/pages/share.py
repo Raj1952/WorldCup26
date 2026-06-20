@@ -21,12 +21,24 @@ from src.presentation_layer.components.share_card import (
 
 _PREDICTIONS_PATH = Path("predictions.parquet")
 
+_REQUIRED_COLS = frozenset({
+    "match_id", "date", "home_team", "away_team",
+    "p_home", "p_draw", "p_away", "is_projected",
+    "model_version", "created_at",
+})
+
 
 @st.cache_data(ttl=120)
 def _load() -> pd.DataFrame:
     if not _PREDICTIONS_PATH.exists():
         return pd.DataFrame()
-    return pd.read_parquet(_PREDICTIONS_PATH)
+    try:
+        df = pd.read_parquet(_PREDICTIONS_PATH)
+        if not _REQUIRED_COLS.issubset(df.columns):
+            return pd.DataFrame()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def render(theme=DARK) -> None:
@@ -34,7 +46,7 @@ def render(theme=DARK) -> None:
         '<div class="page-header">'
         "<h1>Share Card</h1>"
         '<p class="subtitle">'
-        "One prediction · no dashboard chrome · 1200×630 PNG for LinkedIn"
+        "Here you can export a match prediction card"
         "</p>"
         "</div>",
         unsafe_allow_html=True,
@@ -42,11 +54,19 @@ def render(theme=DARK) -> None:
 
     df = _load()
     if df.empty:
-        st.markdown(
-            '<div class="no-data"><h3>No predictions available</h3>'
-            "<p>Run <code>python pipelines/refresh.py</code> first.</p></div>",
-            unsafe_allow_html=True,
-        )
+        if _PREDICTIONS_PATH.exists():
+            st.markdown(
+                '<div class="no-data"><h3>Predictions file is missing or corrupted</h3>'
+                "<p>Last refresh may have failed — re-run "
+                "<code>python pipelines/refresh.py</code>.</p></div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="no-data"><h3>No predictions available</h3>'
+                "<p>Run <code>python pipelines/refresh.py</code> first.</p></div>",
+                unsafe_allow_html=True,
+            )
         return
 
     # Known group-stage matches only (§0.5/§3)
@@ -86,12 +106,12 @@ def render(theme=DARK) -> None:
 
     # ── HTML preview ──────────────────────────────────────────────────────────
     st.markdown(
-        '<div class="sec-heading">Preview — 600px · export is 2× this width</div>',
+        '<div class="sec-heading">Preview</div>',
         unsafe_allow_html=True,
     )
     st.markdown(share_card_css(), unsafe_allow_html=True)
     st.markdown(
-        f'<div style="display:flex;justify-content:flex-start;'
+        f'<div class="sc-card-scroll-wrap" style="display:flex;justify-content:flex-start;'
         f'margin:0.6rem 0 1.25rem;">'
         f"{share_html(row)}</div>",
         unsafe_allow_html=True,

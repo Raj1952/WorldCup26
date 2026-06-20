@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +45,7 @@ _OFB_URLS = [
 # football-data.org endpoint for WC2026 (competition code WC, season 2026)
 _FDORG_BASE = "https://api.football-data.org/v4"
 _FDORG_COMPETITION = "WC"
+_last_fdorg_call: float = 0.0
 
 
 def _init_fixtures_table(conn: sqlite3.Connection) -> None:
@@ -108,6 +110,11 @@ def _upsert_result_to_matches(conn: sqlite3.Connection, rec: dict) -> None:
 # ── football-data.org ────────────────────────────────────────────────────────
 
 def _fetch_fdorg(api_key: str) -> list[dict]:
+    global _last_fdorg_call
+    elapsed = time.time() - _last_fdorg_call
+    if elapsed < 6.0:
+        time.sleep(6.0 - elapsed)
+    _last_fdorg_call = time.time()
     headers = {"X-Auth-Token": api_key}
     matches = []
     try:
