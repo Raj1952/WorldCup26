@@ -23,7 +23,7 @@ _PREDICTIONS_PATH = Path("predictions.parquet")
 
 _REQUIRED_COLS = frozenset({
     "match_id", "date", "home_team", "away_team",
-    "p_home", "p_draw", "p_away", "is_projected",
+    "p_home", "p_draw", "p_away",
     "model_version", "created_at",
 })
 

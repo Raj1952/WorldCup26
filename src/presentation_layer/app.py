@@ -42,13 +42,7 @@ st.set_page_config(
 )
 
 # ── Shared CSS + Plotly template (injected ONCE before any st.markdown) ─────
-try:
-    inject_styles(theme=DARK)
-except Exception as _exc:
-    import traceback as _tb
-    st.error(f"**CSS injection failed ({type(_exc).__name__}):** {_exc}")
-    st.code(_tb.format_exc())
-    st.stop()
+inject_styles(theme=DARK)
 register_tempo_template()
 
 # ── Route table ─────────────────────────────────────────────────────────────
