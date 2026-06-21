@@ -32,24 +32,6 @@ from src.presentation_layer.pages import share
 
 load_dotenv()
 
-# ── Wordmark assets (read once at startup) ───────────────────────────────────
-_SVG_PATH = Path(__file__).resolve().parents[2] / "assets" / "tempo-wordmark.svg"
-try:
-    _WORDMARK_SVG: str | None = _SVG_PATH.read_text(encoding="utf-8")
-except FileNotFoundError:
-    _WORDMARK_SVG = None
-
-# T-block icon (the two filled rects) — used at ≤480px where the full
-# wordmark's stroke letters lose legibility at 24px height.
-_TBLOCK_SVG = (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="28 38 162 206"'
-    ' fill="none" role="img" aria-label="Tempo">'
-    '<g fill="currentColor" stroke="none">'
-    '<rect x="30" y="40" width="156" height="50" rx="11"/>'
-    '<rect x="83" y="40" width="50" height="200" rx="11"/>'
-    '</g></svg>'
-)
-
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title=APP_NAME,
@@ -86,19 +68,6 @@ def _get_page() -> str:
 
 def _nav_html(current_page: str) -> str:
     """Build the fixed broadcast-console nav bar as an HTML string."""
-    # Brand: full wordmark on desktop, T-block icon at ≤480px
-    if _WORDMARK_SVG is not None:
-        brand_inner = (
-            f'<span class="tempo-brand-wordmark">{_WORDMARK_SVG}</span>'
-            f'<span class="tempo-brand-icon">{_TBLOCK_SVG}</span>'
-            f'<span class="tempo-brand-sub">WC26 · AI Predictor</span>'
-        )
-    else:
-        brand_inner = (
-            f'<span class="tempo-brand-name">{APP_NAME}</span>'
-            f'<span class="tempo-brand-sub">WC26 · AI Predictor</span>'
-        )
-
     links_html = ""
     for route, icon_name, label, soon in _ROUTES:
         active_class = " is-active" if current_page == route else ""
@@ -119,7 +88,8 @@ def _nav_html(current_page: str) -> str:
   <div class="tempo-nav-rail"></div>
   <div class="tempo-nav-inner">
     <a class="tempo-brand" href="?page=predictions" aria-label="Tempo — home">
-      {brand_inner}
+      <span class="tempo-brand-name">{APP_NAME}</span>
+      <span class="tempo-brand-sub">WC26 · AI Predictor</span>
     </a>
     <ul class="tempo-nav-links" role="menubar" aria-label="Main pages">
       {links_html}
