@@ -196,7 +196,9 @@ button[title="Open sidebar"]               {{ display: none !important; }}
   flex-shrink: 0;
   min-height: 44px;
   line-height: 1;
+  color: var(--gold);      /* currentColor in SVG resolves to gold */
 }}
+.tempo-brand:hover {{ color: var(--gold); }}  /* no hover-dim on the wordmark */
 .tempo-brand-name {{
   font-family: var(--ff-display);
   font-weight: 900;
@@ -213,6 +215,11 @@ button[title="Open sidebar"]               {{ display: none !important; }}
   letter-spacing: 0.1em;
   line-height: 1.6;
 }}
+/* Wordmark SVG — desktop shows full mark; mobile shows T-block icon only */
+.tempo-brand-wordmark {{ display: flex; align-items: center; line-height: 0; }}
+.tempo-brand-wordmark svg {{ height: 24px; width: auto; display: block; }}
+.tempo-brand-icon {{ display: none; line-height: 0; }}
+.tempo-brand-icon svg {{ height: 24px; width: auto; display: block; }}
 /* Nav link list */
 .tempo-nav-links {{
   display: flex;
@@ -316,6 +323,9 @@ button[title="Open sidebar"]               {{ display: none !important; }}
     justify-content: center;
     gap: 0;
   }}
+  /* Swap full wordmark for T-block icon at 480px */
+  .tempo-brand-wordmark {{ display: none; }}
+  .tempo-brand-icon    {{ display: flex; align-items: center; }}
 }}
 
 /* ── st.metric ──────────────────────────────────────────────────────────── */
