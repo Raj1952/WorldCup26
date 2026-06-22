@@ -69,15 +69,18 @@ def _hover(row: pd.Series) -> str:
 def ternary_scatter(
     df: pd.DataFrame,
     selected_idx: int | None = None,
+    neighbor_idxs: list[int] | None = None,
 ) -> go.Figure:
     """
     Build the Scatterternary figure.
 
     Parameters
     ----------
-    df            Group-stage upcoming matches (known teams only).
-    selected_idx  Row position of the currently selected match (if any).
-                  That point is highlighted with a gold ring.
+    df             Group-stage upcoming matches (known teams only).
+    selected_idx   Row position of the currently selected match (if any).
+                   That point gets a solid gold ring (3px).
+    neighbor_idxs  Row positions of similar matches (nearest W/D/L neighbors).
+                   These get a lighter gold outline (2px) so the cluster is visible.
 
     Returns
     -------
@@ -92,6 +95,8 @@ def ternary_scatter(
         )
         return fig
 
+    neighbor_set = set(neighbor_idxs or [])
+
     colors     = [_outcome_color(r) for _, r in df.iterrows()]
     conf       = df[["p_home", "p_draw", "p_away"]].max(axis=1)
     sizes      = (10 + 18 * (conf - 0.33) / 0.67).clip(lower=10, upper=28).tolist()
@@ -100,6 +105,10 @@ def ternary_scatter(
 
     marker_line_colors = ["#111114"] * len(df)
     marker_line_widths = [1.0] * len(df)
+    for ni in neighbor_set:
+        if 0 <= ni < len(df):
+            marker_line_colors[ni] = "rgba(232,184,75,0.55)"
+            marker_line_widths[ni] = 2.0
     if selected_idx is not None and 0 <= selected_idx < len(df):
         marker_line_colors[selected_idx] = _GOLD
         marker_line_widths[selected_idx] = 3.0
