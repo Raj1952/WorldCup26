@@ -32,12 +32,18 @@ from src.presentation_layer.pages import share
 
 load_dotenv()
 
-# ── Wordmark (loaded once at startup; SVG uses currentColor → gold via CSS) ──
+import base64
+
+# ── Wordmark (loaded once at startup; SVG color replaced & base64 encoded for st.html) ──
 _SVG_PATH = Path(__file__).resolve().parents[2] / "assets" / "tempo-wordmark.svg"
 try:
-    _WORDMARK_SVG: str | None = _SVG_PATH.read_text(encoding="utf-8").strip()
+    _RAW_WORDMARK_SVG = _SVG_PATH.read_text(encoding="utf-8").strip()
+    # Replace currentColor with our signature gold #E8B84B so it renders properly in <img>
+    _GOLD_WORDMARK_SVG = _RAW_WORDMARK_SVG.replace("currentColor", "#E8B84B")
+    _WORDMARK_B64 = base64.b64encode(_GOLD_WORDMARK_SVG.encode("utf-8")).decode("utf-8")
+    _WORDMARK_SVG_URI: str | None = f"data:image/svg+xml;base64,{_WORDMARK_B64}"
 except FileNotFoundError:
-    _WORDMARK_SVG = None
+    _WORDMARK_SVG_URI = None
 
 # T-block: the two filled rects only — compact icon for ≤480px viewport.
 # viewBox tightened to the bounding box of the rects (x 28-188, y 38-242).
@@ -49,6 +55,9 @@ _TBLOCK_SVG = (
     '<rect x="83" y="40" width="50"  height="200" rx="11"/>'
     '</g></svg>'
 )
+_GOLD_TBLOCK_SVG = _TBLOCK_SVG.replace("currentColor", "#E8B84B")
+_TBLOCK_B64 = base64.b64encode(_GOLD_TBLOCK_SVG.encode("utf-8")).decode("utf-8")
+_TBLOCK_SVG_URI = f"data:image/svg+xml;base64,{_TBLOCK_B64}"
 
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -88,10 +97,10 @@ def _nav_html(current_page: str) -> str:
     """Build the fixed broadcast-console nav bar as an HTML string."""
     # Desktop: full SVG wordmark. Mobile ≤480px: T-block icon only (CSS toggles).
     # Fallback to text "Tempo" when SVG not on disk (e.g. first run before assets/).
-    if _WORDMARK_SVG is not None:
+    if _WORDMARK_SVG_URI is not None:
         brand_inner = (
-            f'<span class="tempo-brand-wordmark">{_WORDMARK_SVG}</span>'
-            f'<span class="tempo-brand-icon">{_TBLOCK_SVG}</span>'
+            f'<span class="tempo-brand-wordmark"><img src="{_WORDMARK_SVG_URI}" alt="Tempo" /></span>'
+            f'<span class="tempo-brand-icon"><img src="{_TBLOCK_SVG_URI}" alt="Tempo icon" /></span>'
             f'<span class="tempo-brand-sub">WC26 · AI Predictor</span>'
         )
     else:
@@ -247,7 +256,7 @@ def _render_foundation_demo() -> None:
         xaxis=dict(title="Home team"),
         height=300,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.markdown(
         '<p class="data-stamp" style="margin-top:1.5rem;">'
@@ -259,7 +268,7 @@ def _render_foundation_demo() -> None:
 # ── Render nav + route ───────────────────────────────────────────────────────
 
 page = _get_page()
-st.markdown(_nav_html(page), unsafe_allow_html=True)
+st.html(_nav_html(page))
 
 if page == "predictions":
     today.render(theme=DARK)

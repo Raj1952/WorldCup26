@@ -217,9 +217,9 @@ button[title="Open sidebar"]               {{ display: none !important; }}
 }}
 /* Wordmark SVG — desktop shows full mark; mobile shows T-block icon only */
 .tempo-brand-wordmark {{ display: flex; align-items: center; line-height: 0; }}
-.tempo-brand-wordmark svg {{ height: 24px; width: auto; display: block; }}
+.tempo-brand-wordmark img, .tempo-brand-wordmark svg {{ height: 24px; width: auto; display: block; }}
 .tempo-brand-icon {{ display: none; line-height: 0; }}
-.tempo-brand-icon svg {{ height: 24px; width: auto; display: block; }}
+.tempo-brand-icon img, .tempo-brand-icon svg {{ height: 24px; width: auto; display: block; }}
 /* Nav link list */
 .tempo-nav-links {{
   display: flex;

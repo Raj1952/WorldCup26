@@ -145,7 +145,7 @@ def _render_detail(row: pd.Series) -> None:
     if factors:
         st.plotly_chart(
             prediction_waterfall(row),
-            use_container_width=True,
+            width="stretch",
             key=f"wf_ms_{row.get('match_id', hash(home+away))}",
         )
     else:
@@ -205,7 +205,7 @@ def render(theme=DARK) -> None:
     fig   = ternary_scatter(upcoming, selected_idx=selected)
     event = st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         on_select="rerun",
         selection_mode="points",
         key="ternary_chart",

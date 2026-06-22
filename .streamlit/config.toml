@@ -22,6 +22,5 @@ showSidebarNavigation  = false
 gatherUsageStats       = false
 
 [server]
-enableCORS             = false
 enableXsrfProtection   = true
 headless               = true

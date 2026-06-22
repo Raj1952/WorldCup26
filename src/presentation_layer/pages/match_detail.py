@@ -202,7 +202,7 @@ def render(theme=DARK) -> None:
     )
     if facts:
         fig = prediction_waterfall(row)
-        st.plotly_chart(fig, use_container_width=True,
+        st.plotly_chart(fig, width="stretch",
                         key=f"wf_{row.get('match_id', sel_idx)}")
     else:
         st.markdown(

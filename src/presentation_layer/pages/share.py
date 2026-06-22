@@ -148,7 +148,7 @@ def render(theme=DARK) -> None:
         file_name=fname,
         mime="image/png",
         type="primary",
-        use_container_width=False,
+        width="content",
     )
 
     # Data stamp

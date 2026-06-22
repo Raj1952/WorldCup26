@@ -373,7 +373,7 @@ def render(theme=DARK) -> None:
     )
     st.plotly_chart(
         _ladder_chart(df, max_teams=32),
-        use_container_width=True,
+        width="stretch",
         key="ladder_chart",
     )
 
@@ -393,7 +393,7 @@ def render(theme=DARK) -> None:
     )
     st.plotly_chart(
         _uncertainty_chart(df, max_teams=16),
-        use_container_width=True,
+        width="stretch",
         key="uncertainty_chart",
     )
 

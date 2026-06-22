@@ -462,7 +462,7 @@ def render(theme=DARK) -> None:
     if not cal_df.empty:
         st.plotly_chart(
             _reliability_diagram(cal_df, conf_df),
-            use_container_width=True,
+            width="stretch",
         )
     else:
         st.markdown(
@@ -486,7 +486,7 @@ def render(theme=DARK) -> None:
     )
     st.plotly_chart(
         _rps_timeline(hist_df, holdout, baselines),
-        use_container_width=True,
+        width="stretch",
     )
 
     # ── 4. Model registry ─────────────────────────────────────────────────────
@@ -504,7 +504,7 @@ def render(theme=DARK) -> None:
             "Train N":   f"{r.get('n_train', 0):,}",
             "Created":   str(r.get("created_at", ""))[:19],
         })
-    st.dataframe(pd.DataFrame(reg_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(reg_rows), width="stretch", hide_index=True)
 
     # ── 5. Data stamp ─────────────────────────────────────────────────────────
     created_at = str(holdout.get("created_at", registry[-1].get("created_at", "")))[:19]
