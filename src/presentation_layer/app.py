@@ -34,6 +34,12 @@ load_dotenv()
 
 import base64
 
+def _icon_img(name: str, size: int = 16, color: str = "#A7A39B") -> str:
+    """Base64 data URI <img> for a Lucide icon — survives DOMPurify (inline SVG does not)."""
+    svg = icon(name, size=size, color=color)
+    b64 = base64.b64encode(svg.encode()).decode()
+    return f'<img src="data:image/svg+xml;base64,{b64}" width="{size}" height="{size}" alt="" aria-hidden="true" style="display:inline-block;vertical-align:middle;flex-shrink:0;">'
+
 # ── Wordmark (loaded once at startup; SVG color replaced & base64 encoded for st.html) ──
 _SVG_PATH = Path(__file__).resolve().parents[2] / "assets" / "tempo-wordmark.svg"
 try:
@@ -114,7 +120,7 @@ def _nav_html(current_page: str) -> str:
         active_class = " is-active" if current_page == route else ""
         aria_current = 'aria-current="page"' if current_page == route else ""
         soon_badge = '<span class="tempo-nav-soon">soon</span>' if soon else ""
-        nav_icon = icon(icon_name, size=16, color="currentColor")
+        nav_icon = _icon_img(icon_name, size=16)
         links_html += (
             f'<li role="none">'
             f'<a href="?page={route}" class="tempo-nav-link{active_class}" '
