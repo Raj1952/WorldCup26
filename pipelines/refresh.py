@@ -66,6 +66,21 @@ def main() -> None:
     n_live = ingest_live(db_path=DB_PATH)
     _done(f"Live fixtures: {n_live} upserted", t)
 
+    # ── Step 2.5: Archive settled predictions ─────────────────────────────
+    # Runs HERE — after results land in DB but before predictions.parquet is
+    # overwritten with fresh upcoming matches.  Idempotent: skips known IDs.
+    t = _step("Private prediction-vs-result archive")
+    try:
+        from pipelines.archive_results import run_archive
+        n_archived = run_archive(db_path=DB_PATH)
+        if n_archived:
+            logger.info("  %d new prediction outcomes archived to artifacts/private/", n_archived)
+        else:
+            logger.info("  No new completed predictions to archive (skipped)")
+    except Exception as exc:
+        logger.warning("Archive step failed (non-fatal): %s", exc)
+    _done("Archive", t)
+
     # ── Step 3: Feature tables ────────────────────────────────────────────
     t = _step("Build feature tables (Elo + rolling stats)")
     from src.data_layer.build_features import build_features
@@ -214,19 +229,6 @@ def main() -> None:
     except Exception as exc:
         logger.warning("Supermemory step failed (non-fatal): %s", exc)
     _done("Supermemory", t)
-
-    # ── Step 9: Private results archive ──────────────────────────────────────
-    t = _step("Private prediction-vs-result archive")
-    try:
-        from pipelines.archive_results import run_archive
-        n_archived = run_archive(db_path=DB_PATH)
-        if n_archived:
-            logger.info("  %d new prediction outcomes archived to artifacts/private/", n_archived)
-        else:
-            logger.info("  No new completed predictions to archive (skipped)")
-    except Exception as exc:
-        logger.warning("Archive step failed (non-fatal): %s", exc)
-    _done("Archive", t)
 
     logger.info("═" * 60)
     logger.info("Pipeline complete in %.1fs", time.time() - wall_start)
