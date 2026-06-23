@@ -215,6 +215,19 @@ def main() -> None:
         logger.warning("Supermemory step failed (non-fatal): %s", exc)
     _done("Supermemory", t)
 
+    # ── Step 9: Private results archive ──────────────────────────────────────
+    t = _step("Private prediction-vs-result archive")
+    try:
+        from pipelines.archive_results import run_archive
+        n_archived = run_archive(db_path=DB_PATH)
+        if n_archived:
+            logger.info("  %d new prediction outcomes archived to artifacts/private/", n_archived)
+        else:
+            logger.info("  No new completed predictions to archive (skipped)")
+    except Exception as exc:
+        logger.warning("Archive step failed (non-fatal): %s", exc)
+    _done("Archive", t)
+
     logger.info("═" * 60)
     logger.info("Pipeline complete in %.1fs", time.time() - wall_start)
     logger.info("═" * 60)
