@@ -97,3 +97,12 @@ jobs:
 
           git commit -m "chore: daily refresh $(date -u '+%Y-%m-%d') [skip ci]"
           git push
+
+      # ── Private results archive ────────────────────────────────────────────
+      - name: Upload private results archive
+        if: hashFiles('artifacts/private/results_log.csv') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tempo-results-${{ github.run_id }}
+          path: artifacts/private/
+          retention-days: 90
