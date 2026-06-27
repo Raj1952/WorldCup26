@@ -1,5 +1,5 @@
 {
-  "live_version": "20260627_034859_xgboost_calibrated",
+  "live_version": "20260627_083050_xgboost_calibrated",
   "models": [
     {
       "version": "20260625_173154_xgboost_calibrated",
@@ -33,6 +33,17 @@
       "n_train": 25181,
       "n_test": 5900,
       "created_at": "2026-06-27T03:48:59.581949"
+    },
+    {
+      "version": "20260627_083050_xgboost_calibrated",
+      "model_type": "xgboost_calibrated",
+      "model_path": "artifacts/models/20260627_083050_xgboost_calibrated.pkl",
+      "log_loss_test": 0.8424773216247559,
+      "accuracy_test": 0.6152485121441209,
+      "brier_test": 0.1650600184996923,
+      "n_train": 25181,
+      "n_test": 5902,
+      "created_at": "2026-06-27T08:30:50.233313"
     }
   ]
 }
