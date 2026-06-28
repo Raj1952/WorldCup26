@@ -1,5 +1,5 @@
 """
-Match Space — Scatterternary of upcoming group-stage matches in W/D/L space.
+Match Space — Scatterternary of upcoming matches with known teams in W/D/L space.
 
 Desktop: click point → gold ring + comparative context + consequence chain.
 Mobile:  text selectbox below chart (same session_state key, same panels).

@@ -1,5 +1,5 @@
 """
-Scatterternary: all upcoming group-stage matches in Win/Draw/Loss space.
+Scatterternary: all upcoming matches with known teams in Win/Draw/Loss space.
 
 Each point is one match. Clicking a point updates st.session_state so the
 page below can filter the match list to that selection.
@@ -183,7 +183,7 @@ def ternary_scatter(
         margin        = dict(l=60, r=60, t=60, b=20),
         title         = dict(
             text = (
-                "Match Space — upcoming group-stage matches<br>"
+                "Match Space — upcoming matches with known teams<br>"
                 "<sup style='font-size:10px;color:#A7A39B'>"
                 "Select a match below to inspect · "
                 "<span style='color:#4CA882'>●</span> Home favoured  "

@@ -69,15 +69,15 @@ def render(theme=DARK) -> None:
             )
         return
 
-    # Known group-stage matches only (§0.5/§3)
+    # Concrete predictions only — p_home.notna() is the correct guard per §0.5/§3
     matches = (
-        df[df["group_label"].str.match(r"^[A-L]$", na=False)]
+        df[df["p_home"].notna()]
         .sort_values(["date", "kickoff_time"])
         .reset_index(drop=True)
     )
     if matches.empty:
         st.markdown(
-            '<div class="no-data"><h3>No group-stage matches with known teams</h3></div>',
+            '<div class="no-data"><h3>No matches with known teams available</h3></div>',
             unsafe_allow_html=True,
         )
         return
