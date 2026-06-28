@@ -116,7 +116,8 @@ def _hero_card_html(row: pd.Series) -> str:
 
     time_label = f" · {kt} UTC" if kt and kt not in ("00:00", "nan", "") else ""
     kick_badge = "Today's kick-off" if is_today else "Next kick-off"
-    chip_text = f"WC26 · Grp {group} · {date_label}{time_label}"
+    stage_lbl = f"Grp {group}" if len(str(group)) == 1 else str(group)
+    chip_text = f"WC26 · {stage_lbl} · {date_label}{time_label}"
 
     factors = row.get("top_factors", [])
     if isinstance(factors, str):
@@ -171,7 +172,8 @@ def _match_card_html(row: pd.Series) -> str:
         date_label = date_str
 
     time_label = f" · {kt} UTC" if kt and kt not in ("00:00", "nan", "") else ""
-    chip_text = f"WC26 · Grp {group} · {date_label}{time_label}"
+    stage_lbl = f"Grp {group}" if len(str(group)) == 1 else str(group)
+    chip_text = f"WC26 · {stage_lbl} · {date_label}{time_label}"
 
     factors = row.get("top_factors", [])
     if isinstance(factors, str):
@@ -231,9 +233,13 @@ def render(theme=DARK) -> None:
         return
 
     today_str = str(date.today())
-    upcoming = df[df["date"] >= today_str].copy()
-    # Known-team group-stage matches only — per §0.5/§3 (no placeholder knockouts until R6)
-    upcoming = upcoming[upcoming["group_label"].str.match(r"^[A-L]$", na=False)].copy()
+    # Show all unplayed fixtures with concrete predictions (non-NaN probabilities).
+    # Don't filter by date — predict_upcoming() already excludes played matches;
+    # a match dated yesterday is valid if it still has no final score.
+    # Don't filter by group label — R32 concrete fixtures (e.g. South Africa vs Canada)
+    # should display. Only placeholder slots (2A, 1E, 3A/B/C/D/F…) are excluded,
+    # and those already have NaN probabilities per §0.5/§3.
+    upcoming = df[df["p_home"].notna()].copy()
 
     sort_cols = ["date", "kickoff_time"] if "kickoff_time" in upcoming.columns else ["date"]
     upcoming = upcoming.sort_values(sort_cols).reset_index(drop=True)
