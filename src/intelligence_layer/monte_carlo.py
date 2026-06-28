@@ -8,6 +8,13 @@ C4 decisions (confirmed 2026-06-19):
   - Projected knockout slots displayed only on the Bracket page, labeled "Projected".
     Never injected into the Predictions / match-card flow (that stays known-teams-only).
 
+Knockout conditioning (added 2026-06-28):
+  - Played knockout matches are treated as settled: real winner advances with 100%,
+    real loser is eliminated. Only unplayed knockout matches are simulated.
+  - Penalty draws: if the DB stores a draw score for a KO match, the sim falls back
+    to data/manual_results.csv (knockout_winner column) to resolve the advancing team.
+    If neither source resolves it, the match is skipped and Elo probability is used.
+
 Uncertainty note (§C4 point 4):
   champion_std expresses the genuine OUTCOME SPREAD across 50k simulations —
   i.e. the standard deviation of the Bernoulli indicator (team wins tournament) over
@@ -43,47 +50,72 @@ _LAMBDA_HW = (2.2, 0.9)   # home win: (λ_home, λ_away)
 _LAMBDA_D  = (1.1, 1.1)   # draw
 _LAMBDA_AW = (0.9, 2.2)   # away win
 
+# Maps DB group_label for knockout rounds → our sim round key.
+# The round key tracks who REACHES that round (e.g. "r16" = teams that survive R32).
+_KO_DB_TO_ROUND: dict[str, str] = {
+    "R32":   "r16",
+    "R16":   "qf",
+    "QF":    "sf",
+    "SF":    "final",
+    "Final": "champion",
+    # "3P" (third-place play-off) is not part of the title-odds bracket — ignored
+}
+
 
 # ── Data loading ───────────────────────────────────────────────────────────────
 
 def load_current_state(
     db_path: str,
     predictions_path: str = "predictions.parquet",
-) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str], dict[str, float]]:
+    manual_results_path: str = "data/manual_results.csv",
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, str], dict[str, float], list[dict]]:
     """
-    Load current group standings + remaining-fixture probabilities.
+    Load current group standings + remaining-fixture probabilities + settled
+    knockout results.
 
     Returns
     -------
-    played       : played group-stage fixtures with real scores
-    remaining    : remaining fixtures enriched with model probabilities
-    team_group   : {team_name: group_label}
-    elo_ratings  : {team_name: elo_value}  (for knockout-round Elo fallback)
+    played           : played group-stage fixtures with real scores
+    remaining        : remaining group-stage fixtures enriched with model probabilities
+    team_group       : {team_name: group_label}
+    elo_ratings      : {team_name: elo_value}  (for knockout-round Elo fallback)
+    played_knockouts : [{round_key, winner, loser}, ...] for all settled KO matches
     """
     conn = sqlite3.connect(db_path)
 
+    # Group-stage: single-character group labels A–L
     played = pd.read_sql("""
         SELECT date, group_label, home_team, away_team, home_score, away_score
         FROM wc2026_fixtures
-        WHERE home_score IS NOT NULL AND group_label GLOB '[A-L]'
+        WHERE home_score IS NOT NULL AND length(group_label) = 1
         ORDER BY date
     """, conn)
 
     all_fixture_teams = pd.read_sql("""
         SELECT DISTINCT home_team AS team, group_label FROM wc2026_fixtures
-        WHERE group_label GLOB '[A-L]' AND home_team NOT LIKE 'W%'
+        WHERE length(group_label) = 1 AND home_team NOT LIKE 'W%'
         UNION
         SELECT DISTINCT away_team, group_label FROM wc2026_fixtures
-        WHERE group_label GLOB '[A-L]' AND away_team NOT LIKE 'W%'
+        WHERE length(group_label) = 1 AND away_team NOT LIKE 'W%'
     """, conn)
 
     remaining_raw = pd.read_sql("""
         SELECT date, group_label, home_team, away_team
         FROM wc2026_fixtures
         WHERE home_score IS NULL
-          AND group_label GLOB '[A-L]'
-          AND home_team NOT LIKE 'W%%'
-          AND away_team NOT LIKE 'W%%'
+          AND length(group_label) = 1
+          AND home_team NOT LIKE 'W%'
+          AND away_team NOT LIKE 'W%'
+        ORDER BY date
+    """, conn)
+
+    # Knockout matches with settled scores
+    ko_played_raw = pd.read_sql("""
+        SELECT match_id, date, group_label, home_team, away_team,
+               home_score, away_score
+        FROM wc2026_fixtures
+        WHERE home_score IS NOT NULL
+          AND group_label IN ('R32', 'R16', 'QF', 'SF', 'Final')
         ORDER BY date
     """, conn)
 
@@ -95,7 +127,63 @@ def load_current_state(
         all_fixture_teams["team"], all_fixture_teams["group_label"]
     ))
 
-    # Build prediction lookup
+    # ── Penalty-draw fallback: manual_results.csv knockout_winner column ──────
+    manual_ko_winners: dict[str, str] = {}   # match_id → advancing team name
+    try:
+        manual_path = Path(manual_results_path)
+        if manual_path.exists():
+            mdf = pd.read_csv(manual_path)
+            if "knockout_winner" in mdf.columns and "match_id" in mdf.columns:
+                for _, row in mdf.iterrows():
+                    kw = str(row.get("knockout_winner", "")).strip()
+                    if kw and kw.lower() not in ("nan", ""):
+                        manual_ko_winners[str(row["match_id"])] = kw
+    except Exception as exc:
+        logger.warning("Could not read manual_results.csv for KO winners: %s", exc)
+
+    # ── Resolve knockout settled results ──────────────────────────────────────
+    played_knockouts: list[dict] = []
+    for _, row in ko_played_raw.iterrows():
+        round_key = _KO_DB_TO_ROUND.get(str(row["group_label"]))
+        if round_key is None:
+            continue
+        home, away = str(row["home_team"]), str(row["away_team"])
+        hs, as_   = int(row["home_score"]), int(row["away_score"])
+
+        if hs > as_:
+            winner, loser = home, away
+        elif as_ > hs:
+            winner, loser = away, home
+        else:
+            # Draw after 90 min — match went to ET / penalties.
+            # Check manual override; otherwise skip conditioning.
+            mid = str(row["match_id"])
+            if mid in manual_ko_winners:
+                winner = manual_ko_winners[mid]
+                loser  = away if winner == home else home
+                logger.info(
+                    "KO result from manual override: %s beats %s (%d-%d pen)",
+                    winner, loser, hs, as_,
+                )
+            else:
+                logger.warning(
+                    "KO match %s (%s vs %s, %d-%d) ended level — add "
+                    "knockout_winner to data/manual_results.csv to condition on it.",
+                    mid, home, away, hs, as_,
+                )
+                continue
+
+        played_knockouts.append({
+            "round_key": round_key,
+            "winner":    winner,
+            "loser":     loser,
+        })
+        logger.info(
+            "KO settled: %s beats %s → advances to %s",
+            winner, loser, round_key,
+        )
+
+    # ── Prediction lookup for remaining group-stage fixtures ──────────────────
     preds = pd.read_parquet(predictions_path)
     pred_lookup: dict[tuple, tuple] = {
         (r["home_team"], r["away_team"]): (
@@ -109,11 +197,10 @@ def load_current_state(
         if key in pred_lookup:
             ph, pd_, pa = pred_lookup[key]
         else:
-            # Elo-based fallback for any fixture not in predictions
             elo_h = elo_ratings.get(row["home_team"], 1500.0)
             elo_a = elo_ratings.get(row["away_team"], 1500.0)
             raw   = 1.0 / (1.0 + 10.0 ** ((elo_a - elo_h) / 400.0))
-            ph    = raw * 0.45          # scale down for draw probability
+            ph    = raw * 0.45
             pa    = (1 - raw) * 0.45
             pd_   = 1.0 - ph - pa
             logger.warning(
@@ -124,7 +211,7 @@ def load_current_state(
 
     remaining = remaining_raw.copy()
     remaining[["p_home", "p_draw", "p_away"]] = remaining.apply(_get_probs, axis=1)
-    return played, remaining, team_group, elo_ratings
+    return played, remaining, team_group, elo_ratings, played_knockouts
 
 
 # ── Initial standings ──────────────────────────────────────────────────────────
@@ -139,7 +226,7 @@ def _build_initial_standings(
         for t in all_teams
     }
     for _, row in played.iterrows():
-        h, a   = row["home_team"], row["away_team"]
+        h, a    = row["home_team"], row["away_team"]
         hs, as_ = int(row["home_score"]), int(row["away_score"])
         if h not in s or a not in s:
             continue
@@ -177,7 +264,6 @@ def simulate_group_stage(
     """
     rng = np.random.default_rng(seed)
 
-    # Sorted rosters for determinism
     group_teams: dict[str, list[str]] = {}
     for team, grp in sorted(team_group.items()):
         group_teams.setdefault(grp, []).append(team)
@@ -188,18 +274,15 @@ def simulate_group_stage(
     team_idx: dict[str, int] = {t: i for i, t in enumerate(all_teams)}
     n_teams = len(all_teams)
 
-    # Initial standings as flat numpy arrays [n_teams]
     init = _build_initial_standings(played, all_teams)
     init_pts = np.array([init[t]["pts"] for t in all_teams], np.float32)
     init_gf  = np.array([init[t]["gf"]  for t in all_teams], np.float32)
     init_gd  = np.array([init[t]["gd"]  for t in all_teams], np.float32)
 
-    # Per-simulation arrays [n_sims, n_teams]
     pts = np.tile(init_pts, (n_sims, 1))
     gf  = np.tile(init_gf,  (n_sims, 1))
     gd  = np.tile(init_gd,  (n_sims, 1))
 
-    # Simulate each remaining fixture — fully vectorized over n_sims
     for _, row in remaining.iterrows():
         if row["home_team"] not in team_idx or row["away_team"] not in team_idx:
             continue
@@ -209,19 +292,15 @@ def simulate_group_stage(
         ph  = float(row["p_home"])
         pd_ = float(row["p_draw"])
 
-        # Outcome: 0=home win, 1=draw, 2=away win
-        u = rng.random(n_sims)
+        u     = rng.random(n_sims)
         is_hw = (u < ph)
         is_d  = (u >= ph) & (u < ph + pd_)
         is_aw = ~is_hw & ~is_d
 
-        # Sample goals for GD/GF tiebreakers
         h_g_hw = np.maximum(rng.poisson(_LAMBDA_HW[0], n_sims),
                              rng.poisson(_LAMBDA_HW[1], n_sims) + 1).astype(np.float32)
         a_g_hw = rng.poisson(_LAMBDA_HW[1], n_sims).astype(np.float32)
-
-        tie_g = rng.poisson(_LAMBDA_D[0], n_sims).astype(np.float32)
-
+        tie_g  = rng.poisson(_LAMBDA_D[0], n_sims).astype(np.float32)
         a_g_aw = np.maximum(rng.poisson(_LAMBDA_AW[1], n_sims),
                              rng.poisson(_LAMBDA_AW[0], n_sims) + 1).astype(np.float32)
         h_g_aw = rng.poisson(_LAMBDA_AW[0], n_sims).astype(np.float32)
@@ -234,15 +313,13 @@ def simulate_group_stage(
         gf[:,  h_i] += h_g;  gd[:, h_i] += h_g - a_g
         gf[:,  a_i] += a_g;  gd[:, a_i] += a_g - h_g
 
-    # ── Rank teams within each group ──────────────────────────────────────────
     r32_top2  = np.zeros(n_teams, np.int64)
     r32_third = np.zeros(n_teams, np.int64)
 
-    # Third-place stats per sim for best-8 selection: [n_sims, n_groups]
-    n_groups = len(GROUPS)
-    third_pts = np.zeros((n_sims, n_groups), np.float32)
-    third_gd  = np.zeros((n_sims, n_groups), np.float32)
-    third_gf  = np.zeros((n_sims, n_groups), np.float32)
+    n_groups     = len(GROUPS)
+    third_pts    = np.zeros((n_sims, n_groups), np.float32)
+    third_gd     = np.zeros((n_sims, n_groups), np.float32)
+    third_gf     = np.zeros((n_sims, n_groups), np.float32)
     third_global_idx = np.zeros((n_sims, n_groups), np.int32)
 
     for g_i, grp in enumerate(GROUPS):
@@ -250,44 +327,36 @@ def simulate_group_stage(
             continue
         idxs = np.array([team_idx[t] for t in group_teams[grp]], dtype=np.int32)
 
-        g_pts = pts[:, idxs]   # (n_sims, 4)
+        g_pts = pts[:, idxs]
         g_gd  = gd[:,  idxs]
         g_gf  = gf[:,  idxs]
 
-        # Rank: pts → gd → gf (descending).  Alphabetical tiebreak is implicit
-        # in the sorted roster order (stable sort preserves insertion order).
         score = g_pts * 1e6 + g_gd * 1e3 + g_gf
-        ranks = np.argsort(-score, axis=1, kind="stable")  # (n_sims, 4)
+        ranks = np.argsort(-score, axis=1, kind="stable")
 
-        pos1 = ranks[:, 0]   # local index of 1st-place team
-        pos2 = ranks[:, 1]   # 2nd
-        pos3 = ranks[:, 2]   # 3rd
+        pos1 = ranks[:, 0]
+        pos2 = ranks[:, 1]
+        pos3 = ranks[:, 2]
 
-        # Global team indices for top-2
-        global1 = idxs[pos1]  # (n_sims,)
+        global1 = idxs[pos1]
         global2 = idxs[pos2]
         np.add.at(r32_top2, global1, 1)
         np.add.at(r32_top2, global2, 1)
 
-        # Third-place: store stats for best-8 selection
         sim_row = np.arange(n_sims)
-        third_pts[:, g_i]       = g_pts[sim_row, pos3]
-        third_gd[:,  g_i]       = g_gd[ sim_row, pos3]
-        third_gf[:,  g_i]       = g_gf[ sim_row, pos3]
+        third_pts[:, g_i]        = g_pts[sim_row, pos3]
+        third_gd[:,  g_i]        = g_gd[ sim_row, pos3]
+        third_gf[:,  g_i]        = g_gf[ sim_row, pos3]
         third_global_idx[:, g_i] = idxs[pos3]
 
-    # ── Best-8 thirds (vectorized) ────────────────────────────────────────────
-    # Rank all 12 thirds per sim; pick top-8
-    third_score = third_pts * 1e6 + third_gd * 1e3 + third_gf   # (n_sims, 12)
-    best8_cols  = np.argsort(-third_score, axis=1)[:, :N_THIRDS_ADV]  # (n_sims, 8)
-
-    row_idx = np.arange(n_sims)[:, None]
-    best8_global = third_global_idx[row_idx, best8_cols]   # (n_sims, 8)
+    third_score  = third_pts * 1e6 + third_gd * 1e3 + third_gf
+    best8_cols   = np.argsort(-third_score, axis=1)[:, :N_THIRDS_ADV]
+    row_idx      = np.arange(n_sims)[:, None]
+    best8_global = third_global_idx[row_idx, best8_cols]
 
     for col in range(N_THIRDS_ADV):
         np.add.at(r32_third, best8_global[:, col], 1)
 
-    # ── Assemble results ───────────────────────────────────────────────────────
     r32_total = r32_top2 + r32_third
     results: dict[str, dict] = {}
     for i, team in enumerate(all_teams):
@@ -314,18 +383,20 @@ def simulate_full_tournament(
     predictions_path: str = "predictions.parquet",
     n_sims: int = N_SIMS,
     seed: int = SEED,
+    manual_results_path: str = "data/manual_results.csv",
 ) -> pd.DataFrame:
     """
     Full tournament Monte Carlo: group stage + 5 knockout rounds.
 
     Group stage uses model probabilities from predictions.parquet (with Elo
-    fallback). Knockout rounds use Elo-based win probability (no draw).
+    fallback). Knockout rounds use Elo-based win probability for UNPLAYED
+    matches; played knockout matches are conditioned on real results (winner
+    advances 100%, loser eliminated).
 
     Bracket: after each group-stage sim the 32 advancing teams are re-seeded
     by Elo and paired (seed-1 vs seed-32, seed-2 vs seed-31, …). After each
     knockout round winners are re-seeded by Elo before the next pairing —
-    the "re-seeded bracket" method. This produces conservative champion
-    estimates (best teams can meet earlier) and is honest about uncertainty.
+    the "re-seeded bracket" method.
 
     Returns
     -------
@@ -333,11 +404,18 @@ def simulate_full_tournament(
         team, r32_pct, r16_pct, qf_pct, sf_pct, final_pct,
         champion_pct, champion_std
     """
-    played, remaining, team_group, elo_ratings = load_current_state(
-        db_path, predictions_path
+    played, remaining, team_group, elo_ratings, played_knockouts = load_current_state(
+        db_path, predictions_path, manual_results_path
     )
 
-    # Build rosters (deterministic sort for reproducibility)
+    if played_knockouts:
+        logger.info(
+            "%d settled knockout result(s) will override sim: %s",
+            len(played_knockouts),
+            [(ko["winner"], "→", ko["round_key"]) for ko in played_knockouts],
+        )
+
+    # Sorted rosters for determinism
     group_teams: dict[str, list[str]] = {}
     for team, grp in sorted(team_group.items()):
         group_teams.setdefault(grp, []).append(team)
@@ -350,7 +428,7 @@ def simulate_full_tournament(
 
     rng = np.random.default_rng(seed)
 
-    # ── Group-stage simulation (same logic as simulate_group_stage) ───────────
+    # ── Group-stage simulation ────────────────────────────────────────────────
     init     = _build_initial_standings(played, all_teams)
     init_pts = np.array([init[t]["pts"] for t in all_teams], np.float32)
     init_gf  = np.array([init[t]["gf"]  for t in all_teams], np.float32)
@@ -391,7 +469,7 @@ def simulate_full_tournament(
         gf[:,  a_i] += a_g;  gd[:, a_i] += a_g - h_g
 
     # ── Determine R32 qualifiers per sim ──────────────────────────────────────
-    score    = pts * 1e6 + gd * 1e3 + gf   # (n_sims, n_teams)
+    score    = pts * 1e6 + gd * 1e3 + gf
     r32_mask = np.zeros((n_sims, n_teams), dtype=bool)
     n_grps   = len(GROUPS)
     t_score  = np.zeros((n_sims, n_grps), np.float32)
@@ -410,22 +488,32 @@ def simulate_full_tournament(
         t_score[:,  g_i] = g_sc[sr, ranks[:, 2]]
         t_global[:, g_i] = idxs[ranks[:, 2]]
 
-    # Best 8 thirds advance
-    ri        = np.arange(n_sims)[:, None]
+    ri         = np.arange(n_sims)[:, None]
     best8_cols = np.argsort(-t_score, axis=1)[:, :N_THIRDS_ADV]
     r32_mask[ri, t_global[ri, best8_cols]] = True
 
-    # Build (n_sims, 32): top-32 qualifying teams per sim, seeded by Elo
+    # Seed the 32 qualifiers by Elo descending (seed-1 = highest Elo)
     elo_array  = np.array([elo_ratings.get(t, 1500.0) for t in all_teams], np.float32)
     qual_score = np.where(r32_mask, score, np.float32(-1e18))
     current    = np.argsort(-qual_score, axis=1, kind="stable")[:, :32].astype(np.int32)
 
-    # Seed by Elo descending (best teams are seed-1)
     elo_curr  = elo_array[current]
     elo_order = np.argsort(-elo_curr, axis=1)
     current   = current[np.arange(n_sims)[:, None], elo_order]
 
-    # ── Count R32 advancers ───────────────────────────────────────────────────
+    # ── Build per-round conditioning lookup ───────────────────────────────────
+    # ko_settled[round_key] = [(winner_idx, loser_idx), ...]
+    ko_settled: dict[str, list[tuple[int, int]]] = {
+        k: [] for k in ("r16", "qf", "sf", "final", "champion")
+    }
+    for ko in played_knockouts:
+        rk = ko["round_key"]
+        w  = team_idx.get(ko["winner"])
+        l  = team_idx.get(ko["loser"])
+        if w is not None and l is not None and rk in ko_settled:
+            ko_settled[rk].append((w, l))
+
+    # ── Count advancers ───────────────────────────────────────────────────────
     cnt: dict[str, np.ndarray] = {
         "r32":      np.bincount(current.flatten(), minlength=n_teams),
         "r16":      np.zeros(n_teams, np.int64),
@@ -435,25 +523,45 @@ def simulate_full_tournament(
         "champion": np.zeros(n_teams, np.int64),
     }
 
-    # ── Knockout rounds: R32→R16, R16→QF, QF→SF, SF→Final, Final→Champion ───
+    # ── Knockout rounds ───────────────────────────────────────────────────────
     sim_idx = np.arange(n_sims)
 
     for round_key in ("r16", "qf", "sf", "final", "champion"):
-        n_in   = current.shape[1]
-        n_m    = n_in // 2
+        n_in = current.shape[1]
+        n_m  = n_in // 2
 
         # Re-seed by Elo before each round
         elos  = elo_array[current]
         order = np.argsort(-elos, axis=1)
         current = current[sim_idx[:, None], order]
 
-        # Pair: top-half vs bottom-half reversed → seed-1 vs seed-N, etc.
+        # Pair: seed-1 vs seed-N, seed-2 vs seed-(N-1), ...
         a = current[:, :n_m]
         b = current[:, n_m:][:, ::-1].copy()
 
+        # Simulate all matches via Elo
         p_a     = _ko_win_prob(elo_array[a], elo_array[b])
         u       = rng.random((n_sims, n_m)).astype(np.float32)
         winners = np.where(u < p_a, a, b)
+
+        # ── Conditioning: override Elo roll with real settled results ─────────
+        # The real tournament bracket (based on group positions) does NOT match
+        # the Elo re-seeded bracket used in the sim. So we cannot rely on finding
+        # the exact pair in the bracket. Instead we force independently:
+        #   winner always advances from whatever slot they occupy
+        #   loser is always eliminated — their Elo-paired opponent advances
+        for w_idx, l_idx in ko_settled.get(round_key, []):
+            # Winner advances from whichever bracket slot they occupy
+            w_in_a   = (a == w_idx)                # (n_sims, n_m)
+            w_in_b   = (b == w_idx)
+            winners  = np.where(w_in_a, w_idx, winners)
+            winners  = np.where(w_in_b, w_idx, winners)
+            # Loser is eliminated — their Elo-paired opponent takes the slot
+            l_in_a   = (a == l_idx)
+            l_in_b   = (b == l_idx)
+            l_wins   = (winners == l_idx)           # slots where loser "won" the Elo roll
+            opp      = np.where(l_in_a, b, a)      # loser's Elo opponent in each slot
+            winners  = np.where(l_wins & (l_in_a | l_in_b), opp, winners)
 
         cnt[round_key] += np.bincount(winners.flatten(), minlength=n_teams)
         current = winners
@@ -464,7 +572,7 @@ def simulate_full_tournament(
         r32 = int(cnt["r32"][i])
         if r32 == 0:
             continue
-        ch  = int(cnt["champion"][i])
+        ch = int(cnt["champion"][i])
         rows.append({
             "team":         team,
             "r32_pct":      r32 / n_sims,
@@ -472,7 +580,7 @@ def simulate_full_tournament(
             "qf_pct":       int(cnt["qf"][i])    / n_sims,
             "sf_pct":       int(cnt["sf"][i])    / n_sims,
             "final_pct":    int(cnt["final"][i]) / n_sims,
-            "champion_pct": ch  / n_sims,
+            "champion_pct": ch / n_sims,
             "champion_std": float(
                 np.sqrt(max(ch, 1) / n_sims * (1.0 - ch / n_sims) / n_sims)
             ),

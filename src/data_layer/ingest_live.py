@@ -192,7 +192,7 @@ def _parse_group_label(group_str: str, round_str: str) -> str:
     if "third" in r or "3rd" in r:
         return "3P"
     if "final" in r:
-        return "F"
+        return "Final"
     return "GRP"
 
 
