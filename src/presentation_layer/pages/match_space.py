@@ -348,6 +348,49 @@ def render(theme=DARK) -> None:
         st.info("No upcoming matches with concrete predictions. Check back after the next daily refresh.")
         return
 
+    # Ternary chart is meaningless with fewer than 3 points — show cards instead.
+    if len(upcoming) < 3:
+        st.markdown(
+            f'<p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:0.75rem;">'
+            f"Ternary chart requires 3+ matches — showing {len(upcoming)} upcoming match(es).</p>",
+            unsafe_allow_html=True,
+        )
+        for _, row in upcoming.iterrows():
+            home = str(row["home_team"])
+            away = str(row["away_team"])
+            p_h = float(row["p_home"])
+            p_d = float(row["p_draw"])
+            p_a = float(row["p_away"])
+            group = str(row.get("group_label", ""))
+            stage_lbl = f"Grp {group}" if len(group) == 1 else group
+            st.markdown(
+                f'<div style="border:1px solid var(--border);border-left:3px solid var(--gold);'
+                f'border-radius:8px;padding:1rem 1.2rem;margin-bottom:0.75rem;">'
+                f'<div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;'
+                f'letter-spacing:0.08em;margin-bottom:0.5rem;">'
+                f'WC26 · {stage_lbl} · {row.get("date", "")}</div>'
+                f'<div style="font-family:\'Archivo\',sans-serif;font-weight:800;'
+                f'font-size:1.1rem;margin-bottom:0.6rem;">'
+                f'{home} <span style="color:var(--text-muted)">vs</span> {away}</div>'
+                f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:0.82rem;'
+                f'color:var(--text-muted);">'
+                f'{home}: <span style="color:var(--gold)">{p_h:.0%}</span> · '
+                f'Draw: {p_d:.0%} · {away}: {p_a:.0%}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        try:
+            pred_ts = pd.read_parquet(_PREDICTIONS_PATH, columns=["created_at"])["created_at"].max()
+            ts_str = pd.to_datetime(pred_ts).strftime("%Y-%m-%d %H:%M UTC")
+        except Exception:
+            ts_str = "unknown"
+        st.markdown(
+            f'<p class="data-stamp" style="margin-top:1.5rem;">'
+            f"Data as of <code>{ts_str}</code> · Updates daily via batch</p>",
+            unsafe_allow_html=True,
+        )
+        return
+
     selected: int | None = st.session_state.get(_SK)
 
     # Compute neighbors BEFORE rendering ternary so they can be highlighted.

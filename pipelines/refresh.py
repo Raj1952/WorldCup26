@@ -66,6 +66,39 @@ def main() -> None:
     n_live = ingest_live(db_path=DB_PATH)
     _done(f"Live fixtures: {n_live} upserted", t)
 
+    # ── Step 2.1: Warn on unresolved drawn KO matches ─────────────────────
+    try:
+        import sqlite3 as _sq3
+        import pandas as _pd
+        _conn = _sq3.connect(DB_PATH)
+        _draws = _pd.read_sql(
+            "SELECT date, home_team, away_team, home_score, away_score "
+            "FROM wc2026_fixtures "
+            "WHERE home_score IS NOT NULL AND home_score = away_score "
+            "  AND group_label NOT IN ('A','B','C','D','E','F','G','H','I','J','K','L')",
+            _conn,
+        )
+        _conn.close()
+        if not _draws.empty:
+            _man_path = Path("data/manual_results.csv")
+            _resolved: set = set()
+            if _man_path.exists():
+                _man_df = _pd.read_csv(_man_path)
+                if "knockout_winner" in _man_df.columns:
+                    for _, _r in _man_df[_man_df["knockout_winner"].notna()].iterrows():
+                        _resolved.add((str(_r["date"]), str(_r["home_team"]), str(_r["away_team"])))
+            for _, _r in _draws.iterrows():
+                _key = (str(_r["date"]), str(_r["home_team"]), str(_r["away_team"]))
+                if _key not in _resolved:
+                    logger.warning(
+                        "PENALTY UNRESOLVED: %s vs %s on %s (%s-%s) — "
+                        "add knockout_winner to data/manual_results.csv",
+                        _r["home_team"], _r["away_team"], _r["date"],
+                        int(_r["home_score"]), int(_r["away_score"]),
+                    )
+    except Exception as _exc:
+        logger.debug("Penalty-draw check failed: %s", _exc)
+
     # ── Step 2.5: Archive settled predictions ─────────────────────────────
     # Runs HERE — after results land in DB but before predictions.parquet is
     # overwritten with fresh upcoming matches.  Idempotent: skips known IDs.

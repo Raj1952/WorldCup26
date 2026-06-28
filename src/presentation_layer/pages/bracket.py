@@ -24,8 +24,9 @@ from src.presentation_layer.theme import DARK
 from src.data_layer.team_aliases import get_flag_code
 from src.presentation_layer.flags import flag_img
 
-_DB_PATH   = "data/tempo.db"
-_PRED_PATH = "predictions.parquet"
+_DB_PATH      = "data/tempo.db"
+_PRED_PATH    = "predictions.parquet"
+_MANUAL_CSV   = "data/manual_results.csv"
 
 # Ladder columns (display order)
 _ROUNDS = ["r32_pct", "r16_pct", "qf_pct", "sf_pct", "final_pct", "champion_pct"]
@@ -39,6 +40,71 @@ _TEXT    = "#F4F1EA"
 _MUTED   = "#A7A39B"
 _GOLD    = "#E8B84B"
 _WIN     = "#4CA882"
+
+
+# ── Penalty-draw helpers ──────────────────────────────────────────────────────
+
+_KO_GROUP_LABELS = tuple("ABCDEFGHIJKL")
+
+
+def _get_unresolved_penalties(
+    db_path: str = _DB_PATH,
+    manual_path: str = _MANUAL_CSV,
+) -> list[tuple]:
+    """Return list of (date, home, away, h_score, a_score) for KO draws with no manual winner."""
+    import sqlite3 as _sq
+    try:
+        conn = _sq.connect(db_path)
+        df = pd.read_sql(
+            "SELECT date, home_team, away_team, home_score, away_score "
+            "FROM wc2026_fixtures "
+            "WHERE home_score IS NOT NULL AND home_score = away_score "
+            "  AND group_label NOT IN ('A','B','C','D','E','F','G','H','I','J','K','L')",
+            conn,
+        )
+        conn.close()
+    except Exception:
+        return []
+    if df.empty:
+        return []
+    # Check which are already resolved in manual_results.csv
+    resolved: set[tuple] = set()
+    mp = Path(manual_path)
+    if mp.exists():
+        try:
+            mdf = pd.read_csv(mp)
+            if "knockout_winner" in mdf.columns:
+                for _, r in mdf[mdf["knockout_winner"].notna()].iterrows():
+                    resolved.add((str(r["date"]), str(r["home_team"]), str(r["away_team"])))
+        except Exception:
+            pass
+    result = []
+    for _, r in df.iterrows():
+        key = (str(r["date"]), str(r["home_team"]), str(r["away_team"]))
+        if key not in resolved:
+            result.append((
+                str(r["date"]), str(r["home_team"]), str(r["away_team"]),
+                int(r["home_score"]), int(r["away_score"]),
+            ))
+    return result
+
+
+def _penalty_warning_html(unresolved: list[tuple]) -> str:
+    items = "".join(
+        f"<li><strong>{h} vs {a}</strong> on {d} — ended {hs}–{as_} in 90 min</li>"
+        for d, h, a, hs, as_ in unresolved
+    )
+    return (
+        '<div style="background:rgba(232,184,75,0.08);border:1px solid rgba(232,184,75,0.5);'
+        'border-radius:6px;padding:0.75rem 1rem;margin-bottom:1rem;">'
+        '<strong style="color:#E8B84B;">&#9888; Penalty result needed</strong>'
+        f'<ul style="margin:0.5rem 0 0;padding-left:1.2rem;color:var(--text-muted);font-size:0.85rem;">'
+        f'{items}</ul>'
+        '<p style="color:var(--text-muted);font-size:0.78rem;margin:0.5rem 0 0;">'
+        'Add a <code>knockout_winner</code> column to '
+        '<code>data/manual_results.csv</code> to resolve the bracket.</p>'
+        '</div>'
+    )
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -346,6 +412,11 @@ def render(theme=DARK) -> None:
             unsafe_allow_html=True,
         )
         return
+
+    # ── Penalty-draw warning ──────────────────────────────────────────────────
+    _unresolved = _get_unresolved_penalties(_DB_PATH, _MANUAL_CSV)
+    if _unresolved:
+        st.markdown(_penalty_warning_html(_unresolved), unsafe_allow_html=True)
 
     with st.spinner("Running 50,000 tournament simulations…"):
         df = _run_simulation()

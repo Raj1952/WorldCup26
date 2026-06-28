@@ -10,12 +10,13 @@ Idempotent — safe to re-run at any time.
 
 from __future__ import annotations
 
-__all__ = ["ingest_live"]
+__all__ = ["ingest_live", "resolve_knockout_slots"]
 
 import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -323,6 +324,120 @@ def _load_manual() -> list[dict]:
     return records
 
 
+# ── knockout slot resolution ─────────────────────────────────────────────────
+
+_IS_SLOT_CODE = re.compile(r"^[0-9]|^[WL]\d+$|/")
+
+# Match number at which each knockout round starts
+_ROUND_START = {"R32": 73, "R16": 89, "QF": 97, "SF": 101}
+
+
+def _concrete_score(name: str) -> int:
+    """0 if name is a slot/placeholder code; 1 if it's a real team name."""
+    return 0 if _IS_SLOT_CODE.match(str(name)) else 1
+
+
+def resolve_knockout_slots(
+    conn: sqlite3.Connection,
+    manual_results_path: str = "data/manual_results.csv",
+) -> None:
+    """
+    Resolve W- and L-slot codes in knockout fixtures using real match results.
+
+    The i-th fixture (0-indexed, chronological) within each round maps to
+    match number ROUND_START + i.  Winner → W{n}, loser → L{n}.
+
+    Penalty draws: 90-min draw with no winner yet; if data/manual_results.csv
+    has a `knockout_winner` column for that match, that team advances.
+    Without it the slot stays unresolved (safe to call repeatedly).
+    """
+    # Load manual penalty winners: (date, home, away) → winning team
+    manual_winners: dict[tuple, str] = {}
+    mp = Path(manual_results_path)
+    if mp.exists():
+        try:
+            df_man = pd.read_csv(mp)
+            if "knockout_winner" in df_man.columns:
+                for _, r in df_man[df_man["knockout_winner"].notna()].iterrows():
+                    key = (
+                        str(r["date"]),
+                        resolve_alias(str(r["home_team"])),
+                        resolve_alias(str(r["away_team"])),
+                    )
+                    manual_winners[key] = resolve_alias(str(r["knockout_winner"]))
+        except Exception:
+            pass
+
+    for round_key, start in _ROUND_START.items():
+        df_round = pd.read_sql(
+            "SELECT match_id, date, kickoff_time, home_team, away_team, "
+            "       home_score, away_score "
+            "FROM wc2026_fixtures WHERE group_label=? "
+            "ORDER BY date ASC, kickoff_time ASC",
+            conn,
+            params=(round_key,),
+        )
+        if df_round.empty:
+            continue
+
+        # Deduplicate duplicate rows for the same timeslot: prefer most concrete
+        df_round["_conc"] = df_round.apply(
+            lambda r: _concrete_score(r["home_team"]) + _concrete_score(r["away_team"]),
+            axis=1,
+        )
+        df_round = (
+            df_round
+            .sort_values(["date", "kickoff_time", "_conc"], ascending=[True, True, False])
+            .groupby(["date", "kickoff_time"], sort=False)
+            .first()
+            .reset_index()
+            .sort_values(["date", "kickoff_time"])
+            .reset_index(drop=True)
+        )
+
+        for i, row in df_round.iterrows():
+            match_num = start + i
+            home = str(row["home_team"])
+            away = str(row["away_team"])
+            h_score = row["home_score"]
+            a_score = row["away_score"]
+
+            if pd.isna(h_score) or pd.isna(a_score):
+                continue  # match not played yet
+
+            h_score, a_score = int(h_score), int(a_score)
+
+            if h_score > a_score:
+                winner, loser = home, away
+            elif a_score > h_score:
+                winner, loser = away, home
+            else:
+                # 90-min draw — check manual penalty winner
+                key = (str(row["date"]), home, away)
+                winner = manual_winners.get(key)
+                if winner is None:
+                    continue  # unresolved penalty
+                loser = away if winner == home else home
+
+            w_code = f"W{match_num}"
+            l_code = f"L{match_num}"
+            conn.execute(
+                "UPDATE wc2026_fixtures SET home_team=? WHERE home_team=?", (winner, w_code)
+            )
+            conn.execute(
+                "UPDATE wc2026_fixtures SET away_team=? WHERE away_team=?", (winner, w_code)
+            )
+            conn.execute(
+                "UPDATE wc2026_fixtures SET home_team=? WHERE home_team=?", (loser, l_code)
+            )
+            conn.execute(
+                "UPDATE wc2026_fixtures SET away_team=? WHERE away_team=?", (loser, l_code)
+            )
+
+    conn.commit()
+    logger.info("Knockout slot resolution complete.")
+
+
 # ── main entry point ─────────────────────────────────────────────────────────
 
 def ingest_live(db_path: str = DB_PATH) -> int:
@@ -386,6 +501,10 @@ def ingest_live(db_path: str = DB_PATH) -> int:
             logger.debug("upsert failed for %s: %s", rec.get("match_id"), exc)
 
     conn.commit()
+
+    # Resolve W/L slot codes for any knockout rounds where results are in
+    resolve_knockout_slots(conn, manual_results_path=str(MANUAL_CSV))
+
     conn.close()
     logger.info("Upserted %d WC2026 fixtures", upserted)
     return upserted

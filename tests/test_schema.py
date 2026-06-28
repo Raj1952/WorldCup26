@@ -26,7 +26,11 @@ def test_predictions_probabilities_sum():
     import pandas as pd
     import numpy as np
     df = pd.read_parquet(PREDICTIONS_PATH)
-    sums = df["p_home"] + df["p_draw"] + df["p_away"]
+    # Only check rows with concrete predictions (projected slots have NaN probs by design)
+    concrete = df[df["p_home"].notna()]
+    if concrete.empty:
+        pytest.skip("No concrete predictions in file yet")
+    sums = concrete["p_home"] + concrete["p_draw"] + concrete["p_away"]
     assert np.allclose(sums, 1.0, atol=0.02), \
         f"Probabilities don't sum to 1.0: min={sums.min():.4f} max={sums.max():.4f}"
 
@@ -43,6 +47,10 @@ def test_predictions_no_null_teams():
 def test_predictions_valid_probs():
     import pandas as pd
     df = pd.read_parquet(PREDICTIONS_PATH)
+    # Only validate concrete rows — projected slots intentionally carry NaN probs
+    concrete = df[df["p_home"].notna()]
+    if concrete.empty:
+        pytest.skip("No concrete predictions in file yet")
     for col in ["p_home", "p_draw", "p_away"]:
-        assert (df[col] >= 0).all() and (df[col] <= 1).all(), \
+        assert (concrete[col] >= 0).all() and (concrete[col] <= 1).all(), \
             f"{col} values out of [0,1] range"

@@ -21,9 +21,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Bracket slot identifiers — any team name that starts with a digit (e.g. "1A", "3A/B/C")
-# or looks like a match-code (e.g. "L101", "W102").  These have no real team behind them.
-_SLOT_RE = re.compile(r"^[0-9]|^[A-Z]\d{3,}$")
+# Bracket slot identifiers — any team name that starts with a digit (e.g. "1A", "3A/B/C"),
+# a W/L code of any length (e.g. "W73", "W88", "L101", "W102"),
+# or a multi-digit letter code (e.g. "L101").
+_SLOT_RE = re.compile(r"^[0-9]|^[WL]\d+$|^[A-Z]\d{3,}$")
 
 
 def _is_concrete_team(name: str) -> bool:

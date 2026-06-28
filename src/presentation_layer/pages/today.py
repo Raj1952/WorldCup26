@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
@@ -14,12 +15,27 @@ from src.data_layer.team_aliases import get_flag_code
 from src.presentation_layer.flags import flag_img
 
 _PREDICTIONS_PATH = Path("predictions.parquet")
+_DB_PATH = Path("data/tempo.db")
 
 _REQUIRED_COLS = frozenset({
     "match_id", "date", "home_team", "away_team",
     "p_home", "p_draw", "p_away",
     "model_version", "created_at",
 })
+
+
+def _tournament_complete(db_path: str = "data/tempo.db") -> bool:
+    """True if the Final fixture has a recorded result."""
+    try:
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM wc2026_fixtures "
+            "WHERE group_label='Final' AND home_score IS NOT NULL"
+        ).fetchone()
+        conn.close()
+        return bool(row and row[0] > 0)
+    except Exception:
+        return False
 
 
 @st.cache_data(ttl=60)
@@ -245,16 +261,27 @@ def render(theme=DARK) -> None:
     upcoming = upcoming.sort_values(sort_cols).reset_index(drop=True)
 
     if upcoming.empty:
-        total = len(df)
-        st.markdown(
-            f'<div class="no-data"><h3>No upcoming predictions</h3>'
-            f"<p>Loaded {total} row(s) from predictions.parquet but none had concrete team "
-            f"probabilities. All fixtures may have placeholder teams (e.g. 2A, 1E) or have "
-            f"already been played.</p>"
-            f"<p>Re-run <code>python pipelines/refresh.py</code> to fetch updated results "
-            f"and regenerate predictions.</p></div>",
-            unsafe_allow_html=True,
-        )
+        if _tournament_complete(db_path=str(_DB_PATH)):
+            st.markdown(
+                '<div class="no-data">'
+                '<h3>The 2026 World Cup is complete</h3>'
+                '<p>Tempo tracked every match from kick-off through the Final on '
+                'July 19, 2026. See the <strong>Model Report</strong> for the full '
+                'prediction record and RPS score.</p>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            total = len(df)
+            st.markdown(
+                f'<div class="no-data"><h3>No upcoming predictions</h3>'
+                f"<p>Loaded {total} row(s) from predictions.parquet but none had concrete team "
+                f"probabilities. All fixtures may have placeholder teams (e.g. 2A, 1E) or have "
+                f"already been played.</p>"
+                f"<p>Re-run <code>python pipelines/refresh.py</code> to fetch updated results "
+                f"and regenerate predictions.</p></div>",
+                unsafe_allow_html=True,
+            )
         return
 
     # ── Hero match — First Answer + One Hero rules ────────────────────────────
