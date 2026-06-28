@@ -245,7 +245,16 @@ def render(theme=DARK) -> None:
     upcoming = upcoming.sort_values(sort_cols).reset_index(drop=True)
 
     if upcoming.empty:
-        _no_data_banner()
+        total = len(df)
+        st.markdown(
+            f'<div class="no-data"><h3>No upcoming predictions</h3>'
+            f"<p>Loaded {total} row(s) from predictions.parquet but none had concrete team "
+            f"probabilities. All fixtures may have placeholder teams (e.g. 2A, 1E) or have "
+            f"already been played.</p>"
+            f"<p>Re-run <code>python pipelines/refresh.py</code> to fetch updated results "
+            f"and regenerate predictions.</p></div>",
+            unsafe_allow_html=True,
+        )
         return
 
     # ── Hero match — First Answer + One Hero rules ────────────────────────────
