@@ -51,11 +51,12 @@ def _fixture_header_html(row: pd.Series) -> str:
     hf = flag_img(get_flag_code(home), width=48, team_name=home)
     af = flag_img(get_flag_code(away), width=48, team_name=away)
 
+    stage_lbl = f"GRP {group}" if len(str(group)) == 1 else str(group)
     return f"""
 <div class="match-card hero-card">
   <div class="match-card-rail"></div>
   <div class="match-card-body">
-    <div class="match-chip">WC26 · GRP {group} · {date}{kick_str}</div>
+    <div class="match-chip">WC26 · {stage_lbl} · {date}{kick_str}</div>
     <div class="match-teams">
       <div class="team-block">
         <span class="team-flag">{hf}</span>
@@ -157,8 +158,8 @@ def render(theme=DARK) -> None:
         return
 
     # ── Match selector ────────────────────────────────────────────────────────
-    # Filter to known-team matches (group A-L) and sort by date
-    known = df[df["group_label"].str.match(r"^[A-L]$", na=False)].copy()
+    # Filter to matches with concrete predictions (non-NaN probabilities)
+    known = df[df["p_home"].notna()].copy()
     known = known.sort_values(["date", "kickoff_time"]).reset_index(drop=True)
 
     options = [
@@ -166,7 +167,7 @@ def render(theme=DARK) -> None:
         for _, row in known.iterrows()
     ]
     if not options:
-        st.info("No group-stage matches with known teams.")
+        st.info("No matches with concrete predictions available. R32 fixtures are being confirmed — check back after the next daily refresh.")
         return
     sel = st.selectbox("Choose a match", options, label_visibility="collapsed")
     sel_idx = options.index(sel) if sel in options else 0

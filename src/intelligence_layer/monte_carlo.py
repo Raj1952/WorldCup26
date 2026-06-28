@@ -210,7 +210,13 @@ def load_current_state(
         return pd.Series({"p_home": ph, "p_draw": pd_, "p_away": pa})
 
     remaining = remaining_raw.copy()
-    remaining[["p_home", "p_draw", "p_away"]] = remaining.apply(_get_probs, axis=1)
+    if remaining.empty:
+        # All group-stage matches have been played — no remaining fixtures to simulate.
+        remaining["p_home"] = pd.Series(dtype=float)
+        remaining["p_draw"] = pd.Series(dtype=float)
+        remaining["p_away"] = pd.Series(dtype=float)
+    else:
+        remaining[["p_home", "p_draw", "p_away"]] = remaining.apply(_get_probs, axis=1)
     return played, remaining, team_group, elo_ratings, played_knockouts
 
 

@@ -338,14 +338,14 @@ def render(theme=DARK) -> None:
     today_str = str(date.today())
     upcoming  = (
         df[df["date"] >= today_str]
+        .pipe(lambda d: d[d["p_home"].notna()])
         .copy()
-        .pipe(lambda d: d[d["group_label"].str.match(r"^[A-L]$", na=False)])
         .sort_values(["date", "kickoff_time"])
         .reset_index(drop=True)
     )
 
     if upcoming.empty:
-        st.info("No upcoming group-stage matches with known teams.")
+        st.info("No upcoming matches with concrete predictions. Check back after the next daily refresh.")
         return
 
     selected: int | None = st.session_state.get(_SK)
