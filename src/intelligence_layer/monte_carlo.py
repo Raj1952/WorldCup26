@@ -29,6 +29,7 @@ Layer boundary: Layer 2 only. No Streamlit/Plotly imports here.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -60,6 +61,135 @@ _KO_DB_TO_ROUND: dict[str, str] = {
     "Final": "champion",
     # "3P" (third-place play-off) is not part of the title-odds bracket — ignored
 }
+
+
+# ── Real-bracket structure ─────────────────────────────────────────────────────
+# FIFA 2026 match numbering (same convention as ingest_live.resolve_knockout_slots):
+#   R32 = 73–88, R16 = 89–96, QF = 97–100, SF = 101–102, 3P = 103, Final = 104.
+# "W<n>" slot codes reference the winner of match <n>; "1A"/"2B" reference group
+# positions; "3A/B/C/…" reference a best-8 third-placed team from listed groups.
+_ROUND_ORDER = [("R32", 73, 16), ("R16", 89, 8), ("QF", 97, 4), ("SF", 101, 2), ("Final", 104, 1)]
+_ROUND_ADVANCES_TO = {"R32": "r16", "R16": "qf", "QF": "sf", "SF": "final", "Final": "champion"}
+_SLOT_CODE_RE  = re.compile(r"^[0-9]|^[WL]\d+$|/")
+_GRP_SLOT_RE   = re.compile(r"^([12])([A-L])$")
+_THIRD_SLOT_RE = re.compile(r"^3([A-L](?:/[A-L])+)$")
+
+
+def _load_ko_bracket(
+    db_path: str,
+    manual_results_path: str = "data/manual_results.csv",
+) -> list[dict] | None:
+    """
+    Reconstruct the real knockout bracket from wc2026_fixtures.
+
+    Returns a chronologically ordered list of matches:
+        {match_num, round, home, away, home_score, away_score, winner}
+    `winner` is the settled advancing team name (score or manual penalty
+    override), or None if the match is unplayed / unresolved.
+
+    Returns None if the bracket cannot be reconstructed (wrong match counts) —
+    callers then fall back to the Elo re-seeded approximation.
+    """
+    conn = sqlite3.connect(db_path)
+
+    # Manual penalty winners, keyed by (date, home, away)
+    manual_winners: dict[tuple, str] = {}
+    mp = Path(manual_results_path)
+    if mp.exists():
+        try:
+            mdf = pd.read_csv(mp)
+            if "knockout_winner" in mdf.columns:
+                for _, r in mdf[mdf["knockout_winner"].notna()].iterrows():
+                    manual_winners[(str(r["date"]), str(r["home_team"]), str(r["away_team"]))] = \
+                        str(r["knockout_winner"]).strip()
+        except Exception as exc:
+            logger.warning("Could not read manual_results.csv: %s", exc)
+
+    def _concreteness(name: str) -> int:
+        return 0 if _SLOT_CODE_RE.match(str(name)) else 1
+
+    bracket: list[dict] = []
+    for round_key, start, expected in _ROUND_ORDER:
+        df = pd.read_sql(
+            "SELECT date, kickoff_time, home_team, away_team, home_score, away_score "
+            "FROM wc2026_fixtures WHERE group_label=? "
+            "ORDER BY date ASC, kickoff_time ASC",
+            conn, params=(round_key,),
+        )
+        if df.empty and round_key == "Final":
+            # Final row sometimes missing from the feed — it is always W101 vs W102.
+            df = pd.DataFrame([{
+                "date": "", "kickoff_time": "", "home_team": "W101",
+                "away_team": "W102", "home_score": None, "away_score": None,
+            }])
+        # Duplicate rows per timeslot (slot-coded + resolved variants): keep most concrete.
+        df["_conc"] = df.apply(
+            lambda r: _concreteness(r["home_team"]) + _concreteness(r["away_team"]), axis=1
+        )
+        df = (
+            df.sort_values(["date", "kickoff_time", "_conc"], ascending=[True, True, False])
+            .groupby(["date", "kickoff_time"], sort=False).first().reset_index()
+            .sort_values(["date", "kickoff_time"]).reset_index(drop=True)
+        )
+        if len(df) != expected:
+            logger.warning(
+                "Bracket reconstruction failed: %s has %d fixtures (expected %d) "
+                "— falling back to Elo re-seeded bracket.",
+                round_key, len(df), expected,
+            )
+            conn.close()
+            return None
+
+        for i, row in df.iterrows():
+            home, away = str(row["home_team"]), str(row["away_team"])
+            winner = None
+            if pd.notna(row["home_score"]) and pd.notna(row["away_score"]):
+                hs, as_ = int(row["home_score"]), int(row["away_score"])
+                if hs > as_:
+                    winner = home
+                elif as_ > hs:
+                    winner = away
+                else:
+                    winner = manual_winners.get((str(row["date"]), home, away))
+                    if winner is None:
+                        logger.warning(
+                            "KO match %s vs %s (%d-%d) ended level — add knockout_winner "
+                            "to data/manual_results.csv to condition on it.",
+                            home, away, hs, as_,
+                        )
+            bracket.append({
+                "match_num": start + i,
+                "round": round_key,
+                "home": home,
+                "away": away,
+                "winner": winner,
+            })
+
+    conn.close()
+    return bracket
+
+
+def _solve_third_assignment(slots: list[list[int]], groups: list[int]) -> list[int] | None:
+    """Backtracking: assign each third-place slot one advancing group it allows."""
+    n = len(slots)
+    used = [False] * len(groups)
+    out = [-1] * n
+    order = sorted(range(n), key=lambda s: sum(1 for g in groups if g in slots[s]))
+
+    def rec(k: int) -> bool:
+        if k == n:
+            return True
+        s = order[k]
+        for j, g in enumerate(groups):
+            if not used[j] and g in slots[s]:
+                used[j] = True
+                out[s] = g
+                if rec(k + 1):
+                    return True
+                used[j] = False
+        return False
+
+    return out if rec(0) else None
 
 
 # ── Data loading ───────────────────────────────────────────────────────────────
@@ -184,7 +314,11 @@ def load_current_state(
         )
 
     # ── Prediction lookup for remaining group-stage fixtures ──────────────────
-    preds = pd.read_parquet(predictions_path)
+    try:
+        preds = pd.read_parquet(predictions_path)
+    except (FileNotFoundError, OSError) as exc:
+        logger.warning("predictions.parquet unavailable (%s) — Elo fallback for all fixtures", exc)
+        preds = pd.DataFrame(columns=["home_team", "away_team", "p_home", "p_draw", "p_away"])
     pred_lookup: dict[tuple, tuple] = {
         (r["home_team"], r["away_team"]): (
             float(r["p_home"]), float(r["p_draw"]), float(r["p_away"])
@@ -395,14 +529,17 @@ def simulate_full_tournament(
     Full tournament Monte Carlo: group stage + 5 knockout rounds.
 
     Group stage uses model probabilities from predictions.parquet (with Elo
-    fallback). Knockout rounds use Elo-based win probability for UNPLAYED
-    matches; played knockout matches are conditioned on real results (winner
-    advances 100%, loser eliminated).
+    fallback).
 
-    Bracket: after each group-stage sim the 32 advancing teams are re-seeded
-    by Elo and paired (seed-1 vs seed-32, seed-2 vs seed-31, …). After each
-    knockout round winners are re-seeded by Elo before the next pairing —
-    the "re-seeded bracket" method.
+    Knockout rounds walk the REAL FIFA bracket reconstructed from
+    wc2026_fixtures (match numbers 73–104): "W<n>" slots resolve to simulated
+    winners, "1A"/"2B" slots to simulated group positions, "3X/Y/…" slots to
+    best-8 third-placed teams. Unplayed KO matches with concrete teams use
+    calibrated model probabilities (draw mass split 50/50 into ET/pens);
+    otherwise Elo. Played KO matches are conditioned on real results.
+
+    If the bracket cannot be reconstructed from the fixtures table, the sim
+    falls back to the legacy Elo re-seeded bracket approximation.
 
     Returns
     -------
@@ -481,6 +618,9 @@ def simulate_full_tournament(
     t_score  = np.zeros((n_sims, n_grps), np.float32)
     t_global = np.zeros((n_sims, n_grps), np.int32)
 
+    grp_pos1: dict[str, np.ndarray] = {}   # group letter → per-sim winner team idx
+    grp_pos2: dict[str, np.ndarray] = {}   # group letter → per-sim runner-up team idx
+
     for g_i, grp in enumerate(GROUPS):
         if grp not in group_teams:
             continue
@@ -489,6 +629,8 @@ def simulate_full_tournament(
         ranks = np.argsort(-g_sc, axis=1, kind="stable")
         sr    = np.arange(n_sims)
 
+        grp_pos1[grp] = idxs[ranks[:, 0]]
+        grp_pos2[grp] = idxs[ranks[:, 1]]
         r32_mask[sr, idxs[ranks[:, 0]]] = True
         r32_mask[sr, idxs[ranks[:, 1]]] = True
         t_score[:,  g_i] = g_sc[sr, ranks[:, 2]]
@@ -498,30 +640,11 @@ def simulate_full_tournament(
     best8_cols = np.argsort(-t_score, axis=1)[:, :N_THIRDS_ADV]
     r32_mask[ri, t_global[ri, best8_cols]] = True
 
-    # Seed the 32 qualifiers by Elo descending (seed-1 = highest Elo)
-    elo_array  = np.array([elo_ratings.get(t, 1500.0) for t in all_teams], np.float32)
-    qual_score = np.where(r32_mask, score, np.float32(-1e18))
-    current    = np.argsort(-qual_score, axis=1, kind="stable")[:, :32].astype(np.int32)
-
-    elo_curr  = elo_array[current]
-    elo_order = np.argsort(-elo_curr, axis=1)
-    current   = current[np.arange(n_sims)[:, None], elo_order]
-
-    # ── Build per-round conditioning lookup ───────────────────────────────────
-    # ko_settled[round_key] = [(winner_idx, loser_idx), ...]
-    ko_settled: dict[str, list[tuple[int, int]]] = {
-        k: [] for k in ("r16", "qf", "sf", "final", "champion")
-    }
-    for ko in played_knockouts:
-        rk = ko["round_key"]
-        w  = team_idx.get(ko["winner"])
-        l  = team_idx.get(ko["loser"])
-        if w is not None and l is not None and rk in ko_settled:
-            ko_settled[rk].append((w, l))
+    elo_array = np.array([elo_ratings.get(t, 1500.0) for t in all_teams], np.float32)
 
     # ── Count advancers ───────────────────────────────────────────────────────
     cnt: dict[str, np.ndarray] = {
-        "r32":      np.bincount(current.flatten(), minlength=n_teams),
+        "r32":      r32_mask.sum(axis=0).astype(np.int64),
         "r16":      np.zeros(n_teams, np.int64),
         "qf":       np.zeros(n_teams, np.int64),
         "sf":       np.zeros(n_teams, np.int64),
@@ -529,48 +652,167 @@ def simulate_full_tournament(
         "champion": np.zeros(n_teams, np.int64),
     }
 
-    # ── Knockout rounds ───────────────────────────────────────────────────────
-    sim_idx = np.arange(n_sims)
+    # Model probabilities for concrete-team KO fixtures (was Elo-only before).
+    ko_pred_lookup: dict[tuple, tuple] = {}
+    try:
+        kp = pd.read_parquet(predictions_path)
+        for _, r in kp[kp["p_home"].notna()].iterrows():
+            ko_pred_lookup[(str(r["home_team"]), str(r["away_team"]))] = (
+                float(r["p_home"]), float(r["p_draw"]), float(r["p_away"])
+            )
+    except Exception as exc:
+        logger.warning("predictions.parquet unavailable for KO rounds: %s", exc)
 
-    for round_key in ("r16", "qf", "sf", "final", "champion"):
-        n_in = current.shape[1]
-        n_m  = n_in // 2
+    # ── Knockout rounds: walk the REAL bracket ────────────────────────────────
+    def _run_real_bracket(bracket: list[dict]) -> bool:
+        """Simulate the actual FIFA bracket graph. Returns False if any slot
+        cannot be resolved (caller then uses the Elo re-seeded fallback)."""
+        # Best-8 third-place slot resolution (only needed pre/mid group stage)
+        adv_grp_mask = np.zeros((n_sims, n_grps), dtype=bool)
+        adv_grp_mask[ri, best8_cols] = True
 
-        # Re-seed by Elo before each round
-        elos  = elo_array[current]
-        order = np.argsort(-elos, axis=1)
-        current = current[sim_idx[:, None], order]
+        third_slots = [m["home"] for m in bracket if _THIRD_SLOT_RE.match(m["home"])]
+        third_slots += [m["away"] for m in bracket if _THIRD_SLOT_RE.match(m["away"])]
+        third_slots = list(dict.fromkeys(third_slots))
+        third_team: dict[str, np.ndarray] = {}
+        if third_slots:
+            elig = [
+                [GROUPS.index(g) for g in s[1:].split("/") if g in GROUPS]
+                for s in third_slots
+            ]
+            mask_int = adv_grp_mask.astype(np.int64) @ (1 << np.arange(n_grps, dtype=np.int64))
+            uniq, inv = np.unique(mask_int, return_inverse=True)
+            sol = np.zeros((len(uniq), len(third_slots)), np.int32)
+            for u_i, m_val in enumerate(uniq):
+                groups = [g for g in range(n_grps) if (int(m_val) >> g) & 1]
+                assign = _solve_third_assignment(elig, groups)
+                if assign is None:
+                    # ponytail: greedy fallback ignores eligibility for leftovers;
+                    # upgrade to full FIFA allocation table if this ever fires.
+                    assign, used = [], set()
+                    for e in elig:
+                        pick = next((g for g in groups if g in e and g not in used),
+                                    next(g for g in groups if g not in used))
+                        used.add(pick)
+                        assign.append(pick)
+                    logger.warning("Third-place slot assignment infeasible for one "
+                                   "group combination — greedy fallback used.")
+                sol[u_i] = assign
+            slot_group = sol[inv]                       # (n_sims, n_slots)
+            for s_i, s in enumerate(third_slots):
+                third_team[s] = t_global[np.arange(n_sims), slot_group[:, s_i]].astype(np.int32)
 
-        # Pair: seed-1 vs seed-N, seed-2 vs seed-(N-1), ...
-        a = current[:, :n_m]
-        b = current[:, n_m:][:, ::-1].copy()
+        winners_by_num: dict[int, np.ndarray] = {}
 
-        # Simulate all matches via Elo
-        p_a     = _ko_win_prob(elo_array[a], elo_array[b])
-        u       = rng.random((n_sims, n_m)).astype(np.float32)
-        winners = np.where(u < p_a, a, b)
+        def resolve(name: str) -> np.ndarray | None:
+            if name in team_idx:
+                return np.full(n_sims, team_idx[name], np.int32)
+            m = _GRP_SLOT_RE.match(name)
+            if m:
+                pos, letter = m.groups()
+                d = grp_pos1 if pos == "1" else grp_pos2
+                return d.get(letter)
+            if name.startswith("W") and name[1:].isdigit():
+                return winners_by_num.get(int(name[1:]))
+            if name in third_team:
+                return third_team[name]
+            return None
 
-        # ── Conditioning: override Elo roll with real settled results ─────────
-        # The real tournament bracket (based on group positions) does NOT match
-        # the Elo re-seeded bracket used in the sim. So we cannot rely on finding
-        # the exact pair in the bracket. Instead we force independently:
-        #   winner always advances from whatever slot they occupy
-        #   loser is always eliminated — their Elo-paired opponent advances
-        for w_idx, l_idx in ko_settled.get(round_key, []):
-            # Winner advances from whichever bracket slot they occupy
-            w_in_a   = (a == w_idx)                # (n_sims, n_m)
-            w_in_b   = (b == w_idx)
-            winners  = np.where(w_in_a, w_idx, winners)
-            winners  = np.where(w_in_b, w_idx, winners)
-            # Loser is eliminated — their Elo-paired opponent takes the slot
-            l_in_a   = (a == l_idx)
-            l_in_b   = (b == l_idx)
-            l_wins   = (winners == l_idx)           # slots where loser "won" the Elo roll
-            opp      = np.where(l_in_a, b, a)      # loser's Elo opponent in each slot
-            winners  = np.where(l_wins & (l_in_a | l_in_b), opp, winners)
+        for match in bracket:
+            h = resolve(match["home"])
+            a = resolve(match["away"])
+            if h is None or a is None:
+                logger.warning(
+                    "Cannot resolve bracket slot in match %d (%s vs %s) — "
+                    "falling back to Elo re-seeded bracket.",
+                    match["match_num"], match["home"], match["away"],
+                )
+                return False
 
-        cnt[round_key] += np.bincount(winners.flatten(), minlength=n_teams)
-        current = winners
+            settled = match["winner"]
+            w_idx = team_idx.get(settled) if settled else None
+
+            if w_idx is not None:
+                # Conditioning: the real winner advances in every sim where the
+                # simulated bracket produced them in this tie; otherwise (rare,
+                # only when group outcomes diverged) roll Elo between h and a.
+                present = (h == w_idx) | (a == w_idx)
+                p_h  = _ko_win_prob(elo_array[h], elo_array[a])
+                u    = rng.random(n_sims)
+                roll = np.where(u < p_h, h, a)
+                win  = np.where(present, w_idx, roll).astype(np.int32)
+            else:
+                key = (match["home"], match["away"])
+                if key in ko_pred_lookup:
+                    ph_, pd_, _pa = ko_pred_lookup[key]
+                    # ponytail: draw mass split 50/50 into ET/pens win prob;
+                    # upgrade to Elo-weighted or pens-specific model if needed.
+                    p_h = ph_ + 0.5 * pd_
+                else:
+                    p_h = _ko_win_prob(elo_array[h], elo_array[a])
+                u   = rng.random(n_sims)
+                win = np.where(u < p_h, h, a).astype(np.int32)
+
+            winners_by_num[match["match_num"]] = win
+            cnt[_ROUND_ADVANCES_TO[match["round"]]] += np.bincount(win, minlength=n_teams)
+        return True
+
+    bracket = _load_ko_bracket(db_path, manual_results_path)
+    used_real_bracket = bracket is not None and _run_real_bracket(bracket)
+
+    if not used_real_bracket:
+        # ── Fallback: Elo re-seeded bracket (pre-2026 behaviour) ──────────────
+        for k in ("r16", "qf", "sf", "final", "champion"):
+            cnt[k][:] = 0
+        qual_score = np.where(r32_mask, score, np.float32(-1e18))
+        current    = np.argsort(-qual_score, axis=1, kind="stable")[:, :32].astype(np.int32)
+
+        elo_curr  = elo_array[current]
+        elo_order = np.argsort(-elo_curr, axis=1)
+        current   = current[np.arange(n_sims)[:, None], elo_order]
+
+        ko_settled: dict[str, list[tuple[int, int]]] = {
+            k: [] for k in ("r16", "qf", "sf", "final", "champion")
+        }
+        for ko in played_knockouts:
+            rk = ko["round_key"]
+            w  = team_idx.get(ko["winner"])
+            l  = team_idx.get(ko["loser"])
+            if w is not None and l is not None and rk in ko_settled:
+                ko_settled[rk].append((w, l))
+
+        sim_idx = np.arange(n_sims)
+        for round_key in ("r16", "qf", "sf", "final", "champion"):
+            n_in = current.shape[1]
+            n_m  = n_in // 2
+
+            # Re-seed by Elo before each round
+            elos  = elo_array[current]
+            order = np.argsort(-elos, axis=1)
+            current = current[sim_idx[:, None], order]
+
+            # Pair: seed-1 vs seed-N, seed-2 vs seed-(N-1), ...
+            a = current[:, :n_m]
+            b = current[:, n_m:][:, ::-1].copy()
+
+            p_a     = _ko_win_prob(elo_array[a], elo_array[b])
+            u       = rng.random((n_sims, n_m)).astype(np.float32)
+            winners = np.where(u < p_a, a, b)
+
+            # Force real settled results onto the approximate bracket
+            for w_idx, l_idx in ko_settled.get(round_key, []):
+                w_in_a   = (a == w_idx)
+                w_in_b   = (b == w_idx)
+                winners  = np.where(w_in_a, w_idx, winners)
+                winners  = np.where(w_in_b, w_idx, winners)
+                l_in_a   = (a == l_idx)
+                l_in_b   = (b == l_idx)
+                l_wins   = (winners == l_idx)
+                opp      = np.where(l_in_a, b, a)
+                winners  = np.where(l_wins & (l_in_a | l_in_b), opp, winners)
+
+            cnt[round_key] += np.bincount(winners.flatten(), minlength=n_teams)
+            current = winners
 
     # ── Assemble output DataFrame ─────────────────────────────────────────────
     rows = []

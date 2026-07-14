@@ -157,16 +157,17 @@ def main() -> None:
             xgb_result.log_loss_test, xgb_result.accuracy_test,
         )
 
-        # Calibrate on the test slice
+        # Three-way chronological split: fit isotonic on the CALIBRATION slice,
+        # score on the untouched FROZEN TEST slice. Fitting and scoring on the
+        # same rows made the calibrated model always look better than it is.
+        from src.intelligence_layer.train import evaluate_model, time_split
         X_all, y_all, meta = build_feature_matrix(db_path=DB_PATH, exclude_friendlies=True)
-        split_idx = int(len(X_all) * 0.8)
-        X_cal, y_cal = X_all[split_idx:], y_all[split_idx:]
+        _X_tr, _y_tr, X_cal, y_cal, X_test, y_test = time_split(X_all, y_all, meta)
 
         calibrated = calibrate_model(xgb_result.model, X_cal, y_cal)
 
-        from src.intelligence_layer.train import evaluate_model
-        cal_metrics = evaluate_model(calibrated, X_cal, y_cal)
-        logger.info("  Calibrated log-loss: %.4f", cal_metrics["log_loss"])
+        cal_metrics = evaluate_model(calibrated, X_test, y_test)
+        logger.info("  Calibrated log-loss (frozen test): %.4f", cal_metrics["log_loss"])
 
         promote_if_better(
             calibrated,
