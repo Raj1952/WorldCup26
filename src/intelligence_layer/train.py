@@ -7,7 +7,8 @@ Baseline must be beaten before XGBoost is promoted.
 
 from __future__ import annotations
 
-__all__ = ["train_baseline", "train_xgboost", "evaluate_model", "TrainingResult"]
+__all__ = ["train_baseline", "train_xgboost", "evaluate_model", "TrainingResult",
+           "time_split", "BaselineWrapper"]
 
 import logging
 import sqlite3
@@ -26,10 +27,56 @@ from .features import build_feature_matrix, FEATURE_COLS
 
 logger = logging.getLogger(__name__)
 
-# Time split: train on everything before this date, test on after
-_TEST_START = "2018-01-01"
-# WC2026 is ongoing: final train cutoff is yesterday (pipeline caller sets this)
+# Three-way chronological split (train / calibration / frozen test).
+# Calibration must NEVER overlap train (isotonic would leak) and test must
+# NEVER be used for fitting anything — it is the frozen promotion yardstick.
+_CAL_START = "2018-01-01"    # train:  date <  _CAL_START
+_TEST_START = "2023-01-01"   # cal:    _CAL_START <= date < _TEST_START
+                             # test:   date >= _TEST_START
 _MIN_TRAIN_SIZE = 5000  # refuse to train if fewer rows
+_MIN_SEGMENT = 500      # fall back to proportional split below this
+
+
+def time_split(
+    X: np.ndarray, y: np.ndarray, meta,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Chronological train / calibration / test split.
+
+    Returns (X_train, y_train, X_cal, y_cal, X_test, y_test).
+    Falls back to a proportional 70/15/15 split if any date segment is
+    too small (e.g. synthetic test databases).
+    """
+    dates = meta["date"].values
+    n_train = int((dates < _CAL_START).sum())
+    n_cal_end = int((dates < _TEST_START).sum())
+
+    if (n_train < _MIN_SEGMENT
+            or (n_cal_end - n_train) < _MIN_SEGMENT
+            or (len(X) - n_cal_end) < _MIN_SEGMENT):
+        n_train = int(len(X) * 0.70)
+        n_cal_end = int(len(X) * 0.85)
+
+    return (X[:n_train], y[:n_train],
+            X[n_train:n_cal_end], y[n_train:n_cal_end],
+            X[n_cal_end:], y[n_cal_end:])
+
+
+class BaselineWrapper:
+    """Column-subset adapter so the baseline accepts the full feature matrix.
+
+    Module-level on purpose: locally-defined classes cannot be pickled, which
+    corrupted registry artifacts and could kill prediction serving."""
+
+    def __init__(self, inner, cols):
+        self._inner = inner
+        self._cols = cols
+
+    def predict(self, X):
+        return self._inner.predict(X[:, self._cols])
+
+    def predict_proba(self, X):
+        return self._inner.predict_proba(X[:, self._cols])
 
 
 @dataclass
@@ -65,30 +112,15 @@ def train_baseline(db_path: str = "data/tempo.db") -> TrainingResult:
     if len(X) < _MIN_TRAIN_SIZE:
         raise RuntimeError(f"Only {len(X)} training rows — run ingest first.")
 
-    split_idx = (meta["date"] < _TEST_START).sum()
-    if split_idx < _MIN_TRAIN_SIZE // 2:
-        split_idx = int(len(X) * 0.8)
+    X_train, y_train, _X_cal, _y_cal, X_test, y_test = time_split(X, y, meta)
 
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
-
-    # Baseline only uses Elo-related features (cols 0-2 = elo_diff, elo_home, elo_away)
+    # Baseline only uses Elo + form features
     baseline_cols = [0, 1, 2, 3, 4, 5]  # elo_diff, elo_home, elo_away, form_diff, form_home, form_away
     model = Pipeline([
         ("scaler", StandardScaler()),
         ("lr", LogisticRegression(max_iter=500, C=1.0)),
     ])
     model.fit(X_train[:, baseline_cols], y_train)
-
-    # Wrap to handle full feature matrix
-    class BaselineWrapper:
-        def __init__(self, inner, cols):
-            self._inner = inner
-            self._cols = cols
-        def predict(self, X):
-            return self._inner.predict(X[:, self._cols])
-        def predict_proba(self, X):
-            return self._inner.predict_proba(X[:, self._cols])
 
     wrapped = BaselineWrapper(model, baseline_cols)
     metrics_train = evaluate_model(wrapped, X_train, y_train)
@@ -116,12 +148,7 @@ def train_xgboost(db_path: str = "data/tempo.db") -> TrainingResult:
     if len(X) < _MIN_TRAIN_SIZE:
         raise RuntimeError(f"Only {len(X)} training rows — run ingest first.")
 
-    split_idx = (meta["date"] < _TEST_START).sum()
-    if split_idx < _MIN_TRAIN_SIZE // 2:
-        split_idx = int(len(X) * 0.8)
-
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    X_train, y_train, X_cal, y_cal, X_test, y_test = time_split(X, y, meta)
 
     model = xgb.XGBClassifier(
         n_estimators=400,
@@ -137,7 +164,8 @@ def train_xgboost(db_path: str = "data/tempo.db") -> TrainingResult:
         random_state=42,
         n_jobs=-1,
     )
-    eval_set = [(X_train, y_train), (X_test, y_test)]
+    # Monitor on the calibration slice — the test slice stays untouched by training.
+    eval_set = [(X_train, y_train), (X_cal, y_cal)]
     model.fit(
         X_train, y_train,
         eval_set=eval_set,

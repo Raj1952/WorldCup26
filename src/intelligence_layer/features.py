@@ -104,7 +104,6 @@ def get_prediction_features(
     Build a single-row feature vector for an upcoming match.
     Returns None if not enough data is available.
     """
-    from collections import deque
     from src.intelligence_layer.elo import get_current_elo
     from src.data_layer.build_features import _FORM_WINDOW, _GOALS_WINDOW, _H2H_WINDOW
 
@@ -113,26 +112,25 @@ def get_prediction_features(
         elo_h = get_current_elo(home_team, db_path)
         elo_a = get_current_elo(away_team, db_path)
 
-        def rolling(team: str, col: str, window: int) -> float:
-            rows = pd.read_sql(
-                f"SELECT {col} FROM match_features "
-                "WHERE (home_team=? OR away_team=?) AND date < ? "
-                f"ORDER BY date DESC LIMIT {window}",
+        # All queries below read the raw `matches` table (actual scores), NOT
+        # the derived match_features table, so serving-time features have the
+        # exact same semantics as the deque-based training features in
+        # src/data_layer/build_features.py.
+
+        def last_matches(team: str, limit: int) -> pd.DataFrame:
+            return pd.read_sql(
+                "SELECT date, home_team, away_team, home_score, away_score, outcome "
+                "FROM matches WHERE (home_team=? OR away_team=?) AND date < ? "
+                f"ORDER BY date DESC LIMIT {limit}",
                 conn, params=(team, team, date),
             )
-            return float(rows[col].mean()) if not rows.empty else 1.2 if "gf" in col else 0.5
 
         def form_query(team: str) -> float:
-            rows = pd.read_sql(
-                "SELECT outcome, home_team FROM match_features "
-                "WHERE (home_team=? OR away_team=?) AND date < ? "
-                f"ORDER BY date DESC LIMIT {_FORM_WINDOW}",
-                conn, params=(team, team, date),
-            )
+            rows = last_matches(team, _FORM_WINDOW)
             if rows.empty:
                 return 0.5
             pts = []
-            for _, r in rows.iterrows():
+            for _, r in rows.iterrows():   # newest first — weight 0.9**i, newest = 1.0
                 if r["home_team"] == team:
                     pts.append({"home": 1.0, "draw": 0.5, "away": 0.0}.get(r["outcome"], 0.5))
                 else:
@@ -140,40 +138,50 @@ def get_prediction_features(
             weights = [0.9 ** i for i in range(len(pts))]
             return sum(p * w for p, w in zip(pts, weights)) / sum(weights)
 
-        def rest_days(team: str) -> int:
-            row = pd.read_sql(
-                "SELECT date FROM match_features "
-                "WHERE (home_team=? OR away_team=?) AND date < ? "
-                "ORDER BY date DESC LIMIT 1",
-                conn, params=(team, team, date),
+        def goals(team: str) -> tuple[float, float]:
+            """(mean goals scored, mean goals conceded) over the last window."""
+            rows = last_matches(team, _GOALS_WINDOW)
+            if rows.empty:
+                return 1.2, 1.2
+            scored = rows.apply(
+                lambda r: r["home_score"] if r["home_team"] == team else r["away_score"], axis=1
             )
-            if row.empty:
+            conceded = rows.apply(
+                lambda r: r["away_score"] if r["home_team"] == team else r["home_score"], axis=1
+            )
+            return float(scored.mean()), float(conceded.mean())
+
+        def rest_days(team: str) -> int:
+            rows = last_matches(team, 1)
+            if rows.empty:
                 return 14
-            last = pd.Timestamp(row.iloc[0]["date"])
+            last = pd.Timestamp(rows.iloc[0]["date"])
             return min(int((pd.Timestamp(date) - last).days), 30)
 
         def h2h_rates() -> tuple[float, float, float, int]:
-            h2h_key1 = (home_team, away_team)
             rows = pd.read_sql(
-                "SELECT outcome FROM match_features "
+                "SELECT home_team, away_team, outcome FROM matches "
                 "WHERE ((home_team=? AND away_team=?) OR (home_team=? AND away_team=?)) "
                 f"AND date < ? ORDER BY date DESC LIMIT {_H2H_WINDOW}",
                 conn, params=(home_team, away_team, away_team, home_team, date),
             )
             if rows.empty:
-                return 0.33, 0.33, 0.34, 0
+                return 0.0, 0.0, 0.0, 0    # matches training: empty history → all-zero rates
             n = len(rows)
-            hw = rows["outcome"].eq("home").sum() / n
-            dw = rows["outcome"].eq("draw").sum() / n
-            aw = rows["outcome"].eq("away").sum() / n
+            # Re-orient each past result to the CURRENT fixture's home team.
+            winners = rows.apply(
+                lambda r: r["home_team"] if r["outcome"] == "home"
+                else r["away_team"] if r["outcome"] == "away" else "draw", axis=1
+            )
+            hw = (winners == home_team).sum() / n
+            dw = (winners == "draw").sum() / n
+            aw = (winners == away_team).sum() / n
             return float(hw), float(dw), float(aw), n
 
         form_h = form_query(home_team)
         form_a = form_query(away_team)
-        gf_h = rolling(home_team, "gf_home", _GOALS_WINDOW)
-        ga_h = rolling(home_team, "ga_home", _GOALS_WINDOW)
-        gf_a = rolling(away_team, "gf_away", _GOALS_WINDOW)
-        ga_a = rolling(away_team, "ga_away", _GOALS_WINDOW)
+        gf_h, ga_h = goals(home_team)
+        gf_a, ga_a = goals(away_team)
         rest_h = rest_days(home_team)
         rest_a = rest_days(away_team)
         h2h_hw, h2h_dw, h2h_aw, h2h_n = h2h_rates()

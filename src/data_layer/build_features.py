@@ -97,11 +97,12 @@ def build_features(db_path: str = "data/tempo.db") -> None:
         rest_a = (pd.Timestamp(date) - pd.Timestamp(lp_a)).days if lp_a else 14
 
         h2h_key = tuple(sorted([home, away]))
+        # h2h deque stores the WINNER's name (or 'draw') so rates can be
+        # re-oriented to whichever team is home in the current fixture.
         h2h_hist = list(h2h[h2h_key])
-        # Relative to home team
-        h2h_home_wins = sum(1 for o in h2h_hist if o == "home") / max(len(h2h_hist), 1)
-        h2h_draws = sum(1 for o in h2h_hist if o == "draw") / max(len(h2h_hist), 1)
-        h2h_away_wins = sum(1 for o in h2h_hist if o == "away") / max(len(h2h_hist), 1)
+        h2h_home_wins = sum(1 for w in h2h_hist if w == home) / max(len(h2h_hist), 1)
+        h2h_draws = sum(1 for w in h2h_hist if w == "draw") / max(len(h2h_hist), 1)
+        h2h_away_wins = sum(1 for w in h2h_hist if w == away) / max(len(h2h_hist), 1)
 
         is_neutral = int(m["is_neutral"])
         is_knockout = 1 if m["stage"] == "knockout" else 0
@@ -146,7 +147,9 @@ def build_features(db_path: str = "data/tempo.db") -> None:
         last_played[home] = date
         last_played[away] = date
 
-        h2h[h2h_key].append(outcome)
+        h2h[h2h_key].append(
+            home if outcome == "home" else away if outcome == "away" else "draw"
+        )
 
     feat_df = pd.DataFrame(rows)
     feat_df.to_sql("match_features", conn, if_exists="replace", index=False)
