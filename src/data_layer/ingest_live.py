@@ -368,26 +368,43 @@ def resolve_knockout_slots(
         except Exception:
             pass
 
+    # NOTE: never let a query fail mid-loop — pandas rolls back the connection
+    # on error, silently undoing earlier rounds' uncommitted slot UPDATEs.
+    # Check the column up front instead (minimal test schemas lack updated_at).
+    has_updated_at = any(
+        r[1] == "updated_at"
+        for r in conn.execute("PRAGMA table_info(wc2026_fixtures)")
+    )
+    upd_col = ", updated_at" if has_updated_at else ""
+
     for round_key, start in _ROUND_START.items():
         df_round = pd.read_sql(
             "SELECT match_id, date, kickoff_time, home_team, away_team, "
-            "       home_score, away_score "
+            f"       home_score, away_score{upd_col} "
             "FROM wc2026_fixtures WHERE group_label=? "
             "ORDER BY date ASC, kickoff_time ASC",
             conn,
             params=(round_key,),
         )
+        if not has_updated_at:
+            df_round["updated_at"] = ""
         if df_round.empty:
             continue
 
-        # Deduplicate duplicate rows for the same timeslot: prefer most concrete
+        # Deduplicate rows for the same timeslot: slot resolution changes the
+        # fixture hash, so stale projection rows coexist with real ones.
+        # Prefer rows with a score, then most concrete, then freshest.
+        df_round["_score"] = df_round["home_score"].notna().astype(int)
         df_round["_conc"] = df_round.apply(
             lambda r: _concrete_score(r["home_team"]) + _concrete_score(r["away_team"]),
             axis=1,
         )
         df_round = (
             df_round
-            .sort_values(["date", "kickoff_time", "_conc"], ascending=[True, True, False])
+            .sort_values(
+                ["date", "kickoff_time", "_score", "_conc", "updated_at"],
+                ascending=[True, True, False, False, False],
+            )
             .groupby(["date", "kickoff_time"], sort=False)
             .first()
             .reset_index()

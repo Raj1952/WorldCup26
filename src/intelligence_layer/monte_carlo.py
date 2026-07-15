@@ -108,26 +108,42 @@ def _load_ko_bracket(
     def _concreteness(name: str) -> int:
         return 0 if _SLOT_CODE_RE.match(str(name)) else 1
 
+    has_updated_at = any(
+        r[1] == "updated_at"
+        for r in conn.execute("PRAGMA table_info(wc2026_fixtures)")
+    )
+    upd_col = ", updated_at" if has_updated_at else ""
+
     bracket: list[dict] = []
     for round_key, start, expected in _ROUND_ORDER:
         df = pd.read_sql(
-            "SELECT date, kickoff_time, home_team, away_team, home_score, away_score "
+            "SELECT date, kickoff_time, home_team, away_team, home_score, "
+            f"       away_score{upd_col} "
             "FROM wc2026_fixtures WHERE group_label=? "
             "ORDER BY date ASC, kickoff_time ASC",
             conn, params=(round_key,),
         )
+        if not has_updated_at:
+            df["updated_at"] = ""
         if df.empty and round_key == "Final":
             # Final row sometimes missing from the feed — it is always W101 vs W102.
             df = pd.DataFrame([{
                 "date": "", "kickoff_time": "", "home_team": "W101",
                 "away_team": "W102", "home_score": None, "away_score": None,
+                "updated_at": "",
             }])
-        # Duplicate rows per timeslot (slot-coded + resolved variants): keep most concrete.
+        # Duplicate rows per timeslot: slot resolution changes the fixture hash, so
+        # stale projection rows coexist with real ones. Prefer rows with a score,
+        # then most concrete team names, then the most recently updated.
+        df["_score"] = df["home_score"].notna().astype(int)
         df["_conc"] = df.apply(
             lambda r: _concreteness(r["home_team"]) + _concreteness(r["away_team"]), axis=1
         )
         df = (
-            df.sort_values(["date", "kickoff_time", "_conc"], ascending=[True, True, False])
+            df.sort_values(
+                ["date", "kickoff_time", "_score", "_conc", "updated_at"],
+                ascending=[True, True, False, False, False],
+            )
             .groupby(["date", "kickoff_time"], sort=False).first().reset_index()
             .sort_values(["date", "kickoff_time"]).reset_index(drop=True)
         )
